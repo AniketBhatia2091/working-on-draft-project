@@ -31,46 +31,64 @@ For a given period budget (e.g., ₹15,000):
 
 - [x] **Phase 1**: Core Foundation (Room, DataStore, Calculator, Dashboard, Add Expense, Cut-off Logic)
 - [x] **Phase 2**: Home/Personal Day View & WhatsApp Family Share Flow
-- [ ] **Phase 3**: Weekly Log, Charts & Analytics *(Upcoming)*
-- [ ] **Phase 4**: Savings Screen & Targets *(Upcoming)*
+- [x] **Phase 3**: Weekly Log, Canvas Bar Chart & Home Weekly Share
+- [ ] **Phase 4**: Dedicated Savings Screen & Goals *(Upcoming)*
 - [ ] **Phase 5**: App Lock & Biometrics for Personal Mode *(Upcoming)*
 
 ---
 
-## Phase 2 Deliverables & Features
+## Phase 3 Deliverables & Features
 
-### 1. Home | Personal Day View
-- **Unified Segmented Mode Toggle**: Prominently displayed at the top of the Daily list view (`🏠 Home Mode` | `👤 Personal Mode`), backed by a shared `AppModeState` across ViewModels.
-- **Strict Default**: Always defaults to **HOME** mode on every fresh app launch.
-- **Home View**: Shows only `homeLabel`, `homeAmount`, day total (home), and remaining period home balance.
-- **Personal View**: Reveals `realAmount`, `personalLabel`, day total (real), and the day's savings delta (`home total - real total`).
+### 1. Weekly Log Screen & Navigation
+- **Weekly Tab**: Added a dedicated "Weekly" destination to the bottom navigation bar.
+- **Week Selector**:
+  - Operates on a standard Monday-to-Sunday week cycle.
+  - Date range display (e.g., `10 Nov – 16 Nov`).
+  - Controls: "Previous week", "Next week" (disabled on the current week to prevent future navigation), and a quick "This week" reset button.
+- **Shared App State**: Uses the same `AppModeState` as Phase 2 for the `Home | Personal` toggle, defaulting to **HOME** on every app launch.
 
-### 2. Family WhatsApp Share Flow
-- **Share Preview Bottom Sheet**: Tapping the Share icon opens a read-only bottom sheet displaying the formatted daily message.
-- **Type-Safe Domain Builder (`HomeMessageBuilder`)**:
-  - Accepts strictly `HomeExpenseItem` objects (`homeLabel`, `homeAmount`) and `homeBalance`. It is structurally impossible to leak `realAmount` or `personalLabel`.
-  - Formatted with Indian currency grouping (`₹14,770`, `₹1,05,000`).
-  - Output Example:
+### 2. Day-by-Day List
+- Seven rows covering Monday through Sunday with dates and formatted daily totals.
+- **Home Mode**: Displays day name, date, and that day's Home Total (or a dash if ₹0).
+- **Personal Mode**: Displays day name, date, Real Total, and that day's savings delta (`home - real`).
+- **Deep Linking to Daily View**: Tapping any day opens the Daily List screen pre-focused on that selected date.
+
+### 3. Weekly Totals Card
+- **Home Mode**:
+  - Week Home Total
+  - Average per day (`weekHomeTotal / 7`)
+  - Highest spending day (`Mon (₹X)` or `–` on zero spend; picks earliest day on tie)
+  - Remaining home balance for current budget period
+- **Personal Mode**:
+  - Week Real Total
+  - Week Savings (`weekHomeTotal - weekRealTotal`)
+  - Average per day (real)
+  - Highest spending day (real)
+
+### 4. Custom Compose Canvas Bar Chart
+- **Lightweight Canvas**: Implemented using pure Jetpack Compose Canvas without external dependencies.
+- **Type-Safe Data Isolation**:
+  - `HomeWeekChartData`: Strictly carries only `homeAmount` totals. Real numbers cannot enter the chart in Home mode by type.
+  - `PersonalWeekChartData`: Carries real and home series side-by-side, visually illustrating the private savings gap.
+- Includes day-of-week axis labels (`Mon`..`Sun`), value labels, sensible dynamic scaling, and an empty state banner (`"No expenses this week"`).
+
+### 5. Domain Calculator & Home Weekly Share
+- **`WeeklySummaryCalculator`**:
+  - Aggregates expenses by Monday–Sunday calendar slots.
+  - Handles weeks crossing month boundaries, empty weeks, and single-day activity.
+  - Tie-breaking: picks the earliest day in the week when amounts are equal.
+- **`HomeWeeklyMessageBuilder`**:
+  - Formats family-safe weekly text summary using Indian currency notation (`₹14,770`, `₹1,05,000`):
     ```text
-    Daily Expenses – 14 Nov
-    Lunch – ₹150
-    Auto – ₹80
-    Total today: ₹230
-    Balance left: ₹14,770
+    Weekly Expenses – 10 Nov to 16 Nov
+    Mon – ₹230
+    Tue – ₹180
+    ...
+    Week total: ₹1,450
+    Balance left: ₹13,550
     ```
-  - Handles empty day gracefully: `"No expenses logged today."`
-- **Three Share Actions**:
-  1. **WhatsApp**: `ACTION_SEND` targeting `com.whatsapp`, fallback to `com.whatsapp.w4b` (WhatsApp Business), with system chooser fallback.
-  2. **Saved Person**: Direct WhatsApp link (`https://wa.me/<phone>?text=...`) targeting saved family numbers.
-  3. **Copy**: Copies the formatted text to clipboard and displays an in-app confirmation snackbar.
-
-### 3. Safety Controls
-- **Share Disabled in Personal Mode**: The share action in the top bar is completely disabled while in Personal Mode with an in-app safety banner warning.
-- **Zero Logcat Leaks**: Real amounts and personal labels are never sent to Logcat or any external intent.
-
-### 4. Family Contacts Management
-- **Settings Screen Integration**: Add, edit, and delete family contacts (`name`, `phone`).
-- **Phone Validation**: Validates 10–15 digit phone numbers and automatically prepends country code `91` for 10-digit Indian mobile numbers.
+  - Reuses the Phase 2 Share Preview Bottom Sheet (WhatsApp, Saved Person, Copy).
+  - **Safety**: Sharing is disabled while in Personal Mode with an explanatory warning banner.
 
 ---
 
@@ -89,7 +107,7 @@ For a given period budget (e.g., ₹15,000):
 
 ## Building & Testing
 
-To run unit tests:
+To run all unit tests:
 ```bash
 ./gradlew testDebugUnitTest
 ```

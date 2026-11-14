@@ -54,10 +54,11 @@ class DailyListViewModel(
     private val expenseRepository: ExpenseRepository,
     private val settingsRepository: SettingsRepository,
     private val calculator: ExpenseCalculator,
-    private val appModeState: AppModeState
+    private val appModeState: AppModeState,
+    initialDate: Long? = null
 ) : ViewModel() {
 
-    private val selectedDateFlow = MutableStateFlow(System.currentTimeMillis())
+    private val selectedDateFlow = MutableStateFlow(initialDate ?: System.currentTimeMillis())
     private val isShareSheetVisibleFlow = MutableStateFlow(false)
 
     private val _events = MutableSharedFlow<DailyListEvent>()
@@ -172,7 +173,8 @@ class DailyListViewModel(
         private val expenseRepository: ExpenseRepository,
         private val settingsRepository: SettingsRepository,
         private val calculator: ExpenseCalculator,
-        private val appModeState: AppModeState
+        private val appModeState: AppModeState,
+        private val initialDate: Long? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -180,7 +182,8 @@ class DailyListViewModel(
                 expenseRepository,
                 settingsRepository,
                 calculator,
-                appModeState
+                appModeState,
+                initialDate
             ) as T
         }
     }

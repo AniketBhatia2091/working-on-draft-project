@@ -27,6 +27,9 @@ import com.daykhata.app.ui.dashboard.DashboardViewModel
 import com.daykhata.app.ui.settings.SettingsScreen
 import com.daykhata.app.ui.settings.SettingsViewModel
 
+import com.daykhata.app.ui.weekly.WeeklyScreen
+import com.daykhata.app.ui.weekly.WeeklyViewModel
+
 @Composable
 fun AppNavigation(container: AppContainer) {
     val navController = rememberNavController()
@@ -78,19 +81,33 @@ fun AppNavigation(container: AppContainer) {
                         navController.navigate(Screen.AddExpense.createRoute())
                     },
                     onNavigateToDailyList = {
-                        navController.navigate(Screen.DailyList.route)
+                        navController.navigate(Screen.DailyList.createRoute())
                     }
                 )
             }
 
             // Daily List
-            composable(Screen.DailyList.route) {
+            composable(
+                route = Screen.DailyList.route,
+                arguments = listOf(
+                    navArgument("date") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val dateParam = backStackEntry.arguments?.getString("date")
+                val initialDate = dateParam?.toLongOrNull()
+
                 val viewModel: DailyListViewModel = viewModel(
+                    key = "DailyListViewModel_$initialDate",
                     factory = DailyListViewModel.Factory(
                         expenseRepository = container.expenseRepository,
                         settingsRepository = container.settingsRepository,
                         calculator = container.expenseCalculator,
-                        appModeState = container.appModeState
+                        appModeState = container.appModeState,
+                        initialDate = initialDate
                     )
                 )
                 DailyListScreen(
@@ -100,6 +117,25 @@ fun AppNavigation(container: AppContainer) {
                     },
                     onNavigateToAddExpense = {
                         navController.navigate(Screen.AddExpense.createRoute())
+                    }
+                )
+            }
+
+            // Weekly Log
+            composable(Screen.Weekly.route) {
+                val viewModel: WeeklyViewModel = viewModel(
+                    factory = WeeklyViewModel.Factory(
+                        expenseRepository = container.expenseRepository,
+                        settingsRepository = container.settingsRepository,
+                        expenseCalculator = container.expenseCalculator,
+                        weeklyCalculator = container.weeklySummaryCalculator,
+                        appModeState = container.appModeState
+                    )
+                )
+                WeeklyScreen(
+                    viewModel = viewModel,
+                    onNavigateToDailyDate = { dateMillis ->
+                        navController.navigate(Screen.DailyList.createRoute(dateMillis))
                     }
                 )
             }

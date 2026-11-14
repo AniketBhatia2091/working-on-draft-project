@@ -9,11 +9,13 @@ import com.daykhata.app.data.repository.SettingsRepository
 import com.daykhata.app.data.repository.SettingsRepositoryImpl
 import com.daykhata.app.domain.AppModeState
 import com.daykhata.app.domain.ExpenseCalculator
+import com.daykhata.app.domain.WeeklySummaryCalculator
 
 interface AppContainer {
     val expenseRepository: ExpenseRepository
     val settingsRepository: SettingsRepository
     val expenseCalculator: ExpenseCalculator
+    val weeklySummaryCalculator: WeeklySummaryCalculator
     val appModeState: AppModeState
 }
 
@@ -36,6 +38,10 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val expenseCalculator: ExpenseCalculator by lazy {
         ExpenseCalculator()
+    }
+
+    override val weeklySummaryCalculator: WeeklySummaryCalculator by lazy {
+        WeeklySummaryCalculator()
     }
 
     override val appModeState: AppModeState by lazy {

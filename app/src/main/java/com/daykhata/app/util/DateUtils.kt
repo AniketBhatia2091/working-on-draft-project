@@ -67,4 +67,53 @@ object DateUtils {
         val today = LocalDate.now(zone)
         return target.isEqual(today)
     }
+
+    /**
+     * Calculates the Monday 00:00:00 to Sunday 23:59:59 epoch range containing the given epochMillis.
+     */
+    fun getWeekRangeForDate(epochMillis: Long): Pair<Long, Long> {
+        val zone = ZoneId.systemDefault()
+        val localDate = Instant.ofEpochMilli(epochMillis).atZone(zone).toLocalDate()
+        val monday = localDate.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val sunday = localDate.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        val startEpoch = monday.atStartOfDay(zone).toInstant().toEpochMilli()
+        val endEpoch = sunday.plusDays(1).atStartOfDay(zone).minusNanos(1_000_000).toInstant().toEpochMilli()
+        return Pair(startEpoch, endEpoch)
+    }
+
+    /**
+     * Returns the 7 days of the week (Monday through Sunday) starting from the Monday epoch.
+     */
+    fun getDaysOfWeekForRange(startOfWeekEpoch: Long): List<Pair<DayOfWeek, Long>> {
+        val zone = ZoneId.systemDefault()
+        val monday = Instant.ofEpochMilli(startOfWeekEpoch).atZone(zone).toLocalDate()
+        return (0..6).map { dayOffset ->
+            val date = monday.plusDays(dayOffset.toLong())
+            Pair(date.dayOfWeek, date.atStartOfDay(zone).toInstant().toEpochMilli())
+        }
+    }
+
+    /**
+     * Formats week range as "10 Nov – 16 Nov"
+     */
+    fun formatWeekRange(startMillis: Long, endMillis: Long): String {
+        val formatter = SimpleDateFormat("d MMM", Locale.ENGLISH)
+        return "${formatter.format(Date(startMillis))} – ${formatter.format(Date(endMillis))}"
+    }
+
+    /**
+     * Formats week range for WhatsApp share as "10 Nov to 16 Nov"
+     */
+    fun formatWeekRangeWithTo(startMillis: Long, endMillis: Long): String {
+        val formatter = SimpleDateFormat("d MMM", Locale.ENGLISH)
+        return "${formatter.format(Date(startMillis))} to ${formatter.format(Date(endMillis))}"
+    }
+
+    /**
+     * Returns true if the week range contains today's date.
+     */
+    fun isCurrentWeek(startMillis: Long, endMillis: Long): Boolean {
+        val now = System.currentTimeMillis()
+        return now in startMillis..endMillis
+    }
 }
