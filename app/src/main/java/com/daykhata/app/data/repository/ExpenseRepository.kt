@@ -12,6 +12,7 @@ interface ExpenseRepository {
     suspend fun insertExpense(expense: Expense): Long
     suspend fun updateExpense(expense: Expense)
     suspend fun deleteExpense(expense: Expense)
+    suspend fun deleteAllExpenses()
 }
 
 class ExpenseRepositoryImpl(
@@ -44,5 +45,9 @@ class ExpenseRepositoryImpl(
 
     override suspend fun deleteExpense(expense: Expense) {
         expenseDao.delete(expense)
+    }
+
+    override suspend fun deleteAllExpenses() {
+        expenseDao.deleteAllExpenses()
     }
 }

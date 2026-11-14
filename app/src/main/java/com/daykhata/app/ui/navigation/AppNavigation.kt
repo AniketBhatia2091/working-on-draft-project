@@ -7,8 +7,13 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -18,29 +23,106 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.daykhata.app.AppContainer
+import com.daykhata.app.domain.model.SecuritySettings
+import com.daykhata.app.domain.model.ViewMode
+import com.daykhata.app.domain.security.BiometricHelper
 import com.daykhata.app.ui.add_expense.AddExpenseScreen
 import com.daykhata.app.ui.add_expense.AddExpenseViewModel
 import com.daykhata.app.ui.daily_list.DailyListScreen
 import com.daykhata.app.ui.daily_list.DailyListViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.daykhata.app.domain.model.ViewMode
 import com.daykhata.app.ui.dashboard.DashboardScreen
 import com.daykhata.app.ui.dashboard.DashboardViewModel
 import com.daykhata.app.ui.savings.SavingsScreen
 import com.daykhata.app.ui.savings.SavingsViewModel
+import com.daykhata.app.ui.security.PinAuthDialog
+import com.daykhata.app.ui.security.PinSetupDialog
 import com.daykhata.app.ui.settings.SettingsScreen
 import com.daykhata.app.ui.settings.SettingsViewModel
 import com.daykhata.app.ui.weekly.WeeklyScreen
 import com.daykhata.app.ui.weekly.WeeklyViewModel
 
 @Composable
-fun AppNavigation(container: AppContainer) {
+fun AppNavigation(
+    container: AppContainer,
+    activity: FragmentActivity? = null
+) {
+    val context = LocalContext.current
+    val fragmentActivity = activity ?: (context as? FragmentActivity)
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
     val appMode by container.appModeState.mode.collectAsStateWithLifecycle()
     val isPersonalMode = appMode == ViewMode.PERSONAL
+
+    val isAuthRequested by container.appModeState.authRequested.collectAsStateWithLifecycle()
+    val securitySettings by container.settingsRepository.securitySettings.collectAsStateWithLifecycle(
+        initialValue = SecuritySettings()
+    )
+
+    val isBiometricAvailable = remember(context) {
+        BiometricHelper.isBiometricAvailable(context)
+    }
+
+    // Auto-trigger biometric prompt if requested, biometric enabled, and PIN is set
+    LaunchedEffect(isAuthRequested) {
+        if (isAuthRequested && securitySettings.isPinSet && securitySettings.isBiometricEnabled && isBiometricAvailable && !securitySettings.isLockedOut) {
+            fragmentActivity?.let { act ->
+                BiometricHelper.showBiometricPrompt(
+                    activity = act,
+                    onSuccess = {
+                        container.appModeState.onAuthenticated()
+                    },
+                    onError = { _, _ -> }
+                )
+            }
+        }
+    }
+
+    // Authentication Dialogs
+    if (isAuthRequested) {
+        if (!securitySettings.isPinSet) {
+            PinSetupDialog(
+                isBiometricAvailable = isBiometricAvailable,
+                onPinCreated = { pin, enableBio ->
+                    container.settingsRepository.setPin(pin)
+                    container.settingsRepository.setBiometricEnabled(enableBio)
+                },
+                onSuccess = {
+                    container.appModeState.onAuthenticated()
+                },
+                onDismiss = {
+                    container.appModeState.cancelAuthRequest()
+                }
+            )
+        } else {
+            PinAuthDialog(
+                securitySettings = securitySettings,
+                isBiometricAvailable = isBiometricAvailable,
+                onVerifyPin = { pin ->
+                    container.settingsRepository.verifyPin(pin)
+                },
+                onTriggerBiometric = {
+                    fragmentActivity?.let { act ->
+                        BiometricHelper.showBiometricPrompt(
+                            activity = act,
+                            onSuccess = {
+                                container.appModeState.onAuthenticated()
+                            },
+                            onError = { _, _ -> }
+                        )
+                    }
+                },
+                onSuccess = {
+                    container.appModeState.onAuthenticated()
+                },
+                onDismiss = {
+                    container.appModeState.cancelAuthRequest()
+                }
+            )
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -207,7 +289,14 @@ fun AppNavigation(container: AppContainer) {
                         settingsRepository = container.settingsRepository
                     )
                 )
-                SettingsScreen(viewModel = viewModel)
+                SettingsScreen(
+                    viewModel = viewModel,
+                    onResetCompleted = {
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                )
             }
         }
     }

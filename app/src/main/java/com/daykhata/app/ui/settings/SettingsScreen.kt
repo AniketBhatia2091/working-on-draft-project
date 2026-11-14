@@ -2,6 +2,7 @@ package com.daykhata.app.ui.settings
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,18 +19,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Savings
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +46,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -46,6 +57,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,21 +69,33 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.daykhata.app.domain.model.AutoLockTimeout
 import com.daykhata.app.domain.model.FamilyContact
+import com.daykhata.app.domain.model.GoalPeriod
 import com.daykhata.app.domain.model.PeriodType
+import com.daykhata.app.domain.security.BiometricHelper
+import com.daykhata.app.ui.security.PinChangeDialog
+import com.daykhata.app.ui.security.ResetAppLockDialog
 import com.daykhata.app.ui.theme.GreenPositive
 import com.daykhata.app.ui.theme.PrimaryBlue
 import com.daykhata.app.ui.theme.PurplePersonal
 import com.daykhata.app.ui.theme.RedNegative
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    viewModel: SettingsViewModel
+    viewModel: SettingsViewModel,
+    onResetCompleted: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var contactToDelete by remember { mutableStateOf<FamilyContact?>(null) }
+
+    val isBiometricAvailable = remember(context) {
+        BiometricHelper.isBiometricAvailable(context)
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -79,11 +103,15 @@ fun SettingsScreen(
                 is SettingsEvent.ShowToast -> {
                     Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
                 }
+                is SettingsEvent.ResetSuccessful -> {
+                    Toast.makeText(context, "App lock and data purged successfully.", Toast.LENGTH_LONG).show()
+                    onResetCompleted()
+                }
             }
         }
     }
 
-    // Delete contact confirmation dialog
+    // Delete contact dialog
     contactToDelete?.let { contact ->
         AlertDialog(
             onDismissRequest = { contactToDelete = null },
@@ -107,43 +135,33 @@ fun SettingsScreen(
         )
     }
 
-    // Add / Edit Contact Dialog
+    // Add / Edit contact dialog
     if (uiState.showContactDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.dismissContactDialog() },
             title = {
-                Text(
-                    text = if (uiState.contactBeingEdited != null) "Edit Family Contact" else "Add Family Contact",
-                    fontWeight = FontWeight.Bold
-                )
+                Text(if (uiState.contactBeingEdited != null) "Edit Contact" else "Add Family Contact")
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = uiState.contactNameInput,
                         onValueChange = { viewModel.onContactNameChanged(it) },
-                        label = { Text("Contact Name *") },
-                        placeholder = { Text("e.g. Papa, Mom, Spouse") },
+                        label = { Text("Name") },
+                        placeholder = { Text("e.g. Papa, Home, Sister") },
                         isError = uiState.contactNameError != null,
-                        supportingText = {
-                            uiState.contactNameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        },
+                        supportingText = uiState.contactNameError?.let { { Text(it) } },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-
                     OutlinedTextField(
                         value = uiState.contactPhoneInput,
                         onValueChange = { viewModel.onContactPhoneChanged(it) },
-                        label = { Text("Phone Number (with Country Code) *") },
-                        placeholder = { Text("e.g. 9876543210 (defaults to +91)") },
+                        label = { Text("WhatsApp Phone Number") },
+                        placeholder = { Text("e.g. 9876543210") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         isError = uiState.contactPhoneError != null,
-                        supportingText = {
-                            uiState.contactPhoneError?.let {
-                                Text(it, color = MaterialTheme.colorScheme.error)
-                            } ?: Text("10 digits automatically prepend 91")
-                        },
+                        supportingText = uiState.contactPhoneError?.let { { Text(it) } },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -162,6 +180,25 @@ fun SettingsScreen(
         )
     }
 
+    // PIN Change Dialog
+    if (uiState.showPinChangeDialog) {
+        PinChangeDialog(
+            onVerifyCurrentPin = { pin -> viewModel.verifyCurrentPin(pin) },
+            onSaveNewPin = { newPin -> viewModel.saveNewPin(newPin) },
+            onSuccess = { viewModel.dismissChangePinDialog() },
+            onDismiss = { viewModel.dismissChangePinDialog() }
+        )
+    }
+
+    // Reset App Lock Dialog
+    if (uiState.showResetLockDialog) {
+        ResetAppLockDialog(
+            onConfirmReset = { viewModel.resetAppLockAndData() },
+            onSuccess = { viewModel.dismissResetLockDialog() },
+            onDismiss = { viewModel.dismissResetLockDialog() }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -176,24 +213,20 @@ fun SettingsScreen(
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Success Feedback
+            // Success Banner
             AnimatedVisibility(visible = uiState.isSavedSuccess) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = GreenPositive.copy(alpha = 0.1f)),
-                    shape = RoundedCornerShape(10.dp)
+                    colors = CardDefaults.cardColors(containerColor = GreenPositive.copy(alpha = 0.15f)),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = GreenPositive
-                        )
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = GreenPositive)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Settings saved successfully",
@@ -204,304 +237,446 @@ fun SettingsScreen(
                 }
             }
 
-            // Budget Input
-            OutlinedTextField(
-                value = uiState.budget,
-                onValueChange = { viewModel.onBudgetChanged(it) },
-                label = { Text("Period Budget (₹) *") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                isError = uiState.budgetError != null,
-                supportingText = {
-                    uiState.budgetError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    } ?: Text("Total planned spending for the period (e.g. 15000)")
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            // Cut-off Limit Input
-            OutlinedTextField(
-                value = uiState.cutOffLimit,
-                onValueChange = { viewModel.onCutOffLimitChanged(it) },
-                label = { Text("Cut-off Limit (₹) *") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                isError = uiState.cutOffError != null,
-                supportingText = {
-                    uiState.cutOffError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    } ?: Text("Triggers a warning when home balance drops to or below this amount")
-                },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            // Period Type Selector
+            // ==========================================
+            // 1. Budget Settings
+            // ==========================================
+            SectionHeader(title = "1. Budget Settings", icon = Icons.Default.AccountBalanceWallet)
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = uiState.budget,
+                        onValueChange = { viewModel.onBudgetChanged(it) },
+                        label = { Text("Period Budget (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = uiState.budgetError != null,
+                        supportingText = uiState.budgetError?.let { { Text(it) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.cutOffLimit,
+                        onValueChange = { viewModel.onCutOffLimitChanged(it) },
+                        label = { Text("Cut-off Threshold (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = uiState.cutOffError != null,
+                        supportingText = uiState.cutOffError?.let { { Text(it) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Text(
                         text = "Budget Period Type",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
 
-                    PeriodType.entries.forEach { type ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .selectable(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        PeriodType.entries.forEach { type ->
+                            Row(
+                                modifier = Modifier
+                                    .selectable(
+                                        selected = (uiState.periodType == type),
+                                        onClick = { viewModel.onPeriodTypeChanged(type) },
+                                        role = Role.RadioButton
+                                    )
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
                                     selected = (uiState.periodType == type),
-                                    onClick = { viewModel.onPeriodTypeChanged(type) },
-                                    role = Role.RadioButton
+                                    onClick = null
                                 )
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (uiState.periodType == type),
-                                onClick = null
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = when (type) {
-                                    PeriodType.MONTHLY -> "Monthly (Calendar Month)"
-                                    PeriodType.WEEKLY -> "Weekly (Monday to Sunday)"
-                                },
-                                fontSize = 14.sp
-                            )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (type == PeriodType.MONTHLY) "Monthly" else "Weekly",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
+                    }
+
+                    Button(
+                        onClick = { viewModel.saveSettings() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                    ) {
+                        Text("Save Budget Settings")
                     }
                 }
             }
 
-            // Savings Target (Personal)
+            // ==========================================
+            // 2. Savings Target
+            // ==========================================
+            SectionHeader(title = "2. Savings Target", icon = Icons.Default.Savings)
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Flag,
-                            contentDescription = null,
-                            tint = PurplePersonal,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Savings Target (Personal)",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp,
-                            color = PurplePersonal
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
                         value = uiState.savingsGoal,
                         onValueChange = { viewModel.onSavingsGoalChanged(it) },
-                        label = { Text("Savings Target (₹) (Optional)") },
-                        placeholder = { Text("e.g. 5000") },
+                        label = { Text("Savings Goal Amount (₹)") },
+                        placeholder = { Text("e.g. 5000 (Optional)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         isError = uiState.savingsGoalError != null,
-                        supportingText = {
-                            uiState.savingsGoalError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                                ?: Text("Target savings amount (private)")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        supportingText = uiState.savingsGoalError?.let { { Text(it) } },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Target Period",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Goal Target Period",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    com.daykhata.app.domain.model.GoalPeriod.entries.forEach { period ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .selectable(
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        GoalPeriod.entries.forEach { period ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .selectable(
+                                        selected = (uiState.goalPeriod == period),
+                                        onClick = { viewModel.onGoalPeriodChanged(period) },
+                                        role = Role.RadioButton
+                                    )
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
                                     selected = (uiState.goalPeriod == period),
-                                    onClick = { viewModel.onGoalPeriodChanged(period) },
-                                    role = Role.RadioButton
+                                    onClick = null
                                 )
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = (uiState.goalPeriod == period),
-                                onClick = null
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = when (period) {
-                                    com.daykhata.app.domain.model.GoalPeriod.MONTHLY -> "Monthly Target"
-                                    com.daykhata.app.domain.model.GoalPeriod.WEEKLY -> "Weekly Target"
-                                    com.daykhata.app.domain.model.GoalPeriod.NONE -> "No Target (Disabled)"
-                                },
-                                fontSize = 14.sp
-                            )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = when (period) {
+                                        GoalPeriod.NONE -> "No specific period"
+                                        GoalPeriod.WEEKLY -> "Weekly Target"
+                                        GoalPeriod.MONTHLY -> "Monthly Target"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
+                    }
+
+                    Button(
+                        onClick = { viewModel.saveSettings() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                    ) {
+                        Text("Save Savings Target")
                     }
                 }
             }
 
-            // Save Settings Button
-            Button(
-                onClick = { viewModel.saveSettings() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Save Settings", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Family Contacts Section
+            // ==========================================
+            // 3. Family Contacts
+            // ==========================================
+            SectionHeader(title = "3. Family Contacts", icon = Icons.Default.Person)
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Quick WhatsApp recipients for sharing family-safe expense summaries.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (uiState.familyContacts.isEmpty()) {
+                        Text(
+                            text = "No family contacts added yet.",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        uiState.familyContacts.forEach { contact ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = contact.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text(text = contact.phone, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Row {
+                                    IconButton(onClick = { viewModel.openEditContactDialog(contact) }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit", tint = PrimaryBlue)
+                                    }
+                                    IconButton(onClick = { contactToDelete = contact }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = RedNegative)
+                                    }
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { viewModel.openAddContactDialog() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Add Family Contact")
+                    }
+                }
+            }
+
+            // ==========================================
+            // 4. Privacy & Lock
+            // ==========================================
+            SectionHeader(title = "4. Privacy & Lock", icon = Icons.Default.Security)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // PIN Status & Change PIN
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "App Lock PIN", fontWeight = FontWeight.Bold)
                             Text(
-                                text = "Family Contacts",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
+                                text = if (uiState.securitySettings.isPinSet) "PIN is active (4-6 digits)" else "No PIN set (Setup required for Personal mode)",
+                                fontSize = 12.sp,
+                                color = if (uiState.securitySettings.isPinSet) GreenPositive else RedNegative
                             )
+                        }
+                        if (uiState.securitySettings.isPinSet) {
+                            OutlinedButton(onClick = { viewModel.openChangePinDialog() }) {
+                                Text("Change PIN")
+                            }
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    // Biometric Unlock Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Fingerprint, contentDescription = null, tint = PurplePersonal, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = "Biometric Unlock", fontWeight = FontWeight.Medium)
+                            }
                             Text(
-                                text = "Contacts available for one-tap WhatsApp daily share",
+                                text = if (isBiometricAvailable) "Unlock Personal Mode with fingerprint or face" else "Biometrics not available on this device",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        IconButton(onClick = { viewModel.openAddContactDialog() }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Contact", tint = PrimaryBlue)
+                        Switch(
+                            checked = uiState.securitySettings.isBiometricEnabled && isBiometricAvailable,
+                            onCheckedChange = { viewModel.setBiometricEnabled(it) },
+                            enabled = isBiometricAvailable && uiState.securitySettings.isPinSet,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PurplePersonal,
+                                checkedTrackColor = PurplePersonal.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    // Auto-lock inactivity timeout
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(text = "Auto-Lock Inactivity Timeout", fontWeight = FontWeight.Medium)
+                        Text(
+                            text = "Auto-relocks to Home mode when inactive in Personal mode",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        AutoLockTimeout.entries.forEach { timeout ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .selectable(
+                                        selected = (uiState.securitySettings.autoLockTimeout == timeout),
+                                        onClick = { viewModel.setAutoLockTimeout(timeout) },
+                                        role = Role.RadioButton
+                                    )
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = (uiState.securitySettings.autoLockTimeout == timeout),
+                                    onClick = null
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = timeout.label, fontSize = 14.sp)
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
 
-                    if (uiState.familyContacts.isEmpty()) {
-                        Text(
-                            text = "No family contacts added yet. Tap + to add someone.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            uiState.familyContacts.forEach { contact ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Person,
-                                            contentDescription = null,
-                                            tint = PrimaryBlue,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(
-                                                text = contact.name,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 15.sp
-                                            )
-                                            Text(
-                                                text = "+${contact.phone}",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    Row {
-                                        IconButton(
-                                            onClick = { viewModel.openEditContactDialog(contact) },
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit Contact",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = { contactToDelete = contact },
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "Delete Contact",
-                                                tint = RedNegative,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                    // Always Block Screenshots Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Shield, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(text = "Always Block Screenshots", fontWeight = FontWeight.Medium)
                             }
+                            Text(
+                                text = "Keep screen protected (FLAG_SECURE) even in Home mode",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.securitySettings.alwaysBlockScreenshots,
+                            onCheckedChange = { viewModel.setAlwaysBlockScreenshots(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = PrimaryBlue,
+                                checkedTrackColor = PrimaryBlue.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    // Reset App Lock Action
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(text = "Reset App Lock & Purge Data", fontWeight = FontWeight.Bold, color = RedNegative)
+                        Text(
+                            text = "If you forgot your PIN or want to clear all data, resetting the lock permanently wipes all entries and settings to prevent unauthorized access.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = { viewModel.openResetLockDialog() },
+                            colors = ButtonDefaults.buttonColors(containerColor = RedNegative),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.LockReset, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Reset App Lock")
                         }
                     }
                 }
             }
 
-            // Info Card explaining cut-off and transparency rules
+            // ==========================================
+            // 5. About
+            // ==========================================
+            SectionHeader(title = "5. About", icon = Icons.Default.Info)
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.Top
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = PrimaryBlue,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = PrimaryBlue,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(text = "DayKhata", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text(text = "Version 1.0 (Production Release)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    HorizontalDivider()
+
                     Text(
-                        text = "Family Privacy Protection: WhatsApp sharing and daily summaries read ONLY your family-safe home data. Private notes and real spending are never transmitted.",
-                        fontSize = 12.sp,
+                        text = "How it works:",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "DayKhata is a dual-accounting daily expense tracker designed to help you balance shared family household budgets with your personal spending. Keep daily logs clear, calculate savings effortlessly, and share family-ready summaries directly via WhatsApp.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "Home mode displays family-safe expenses, budgets, and WhatsApp summaries. Personal mode reveals real amounts, private logs, and accumulated savings behind biometric and PIN encryption.",
+                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = PrimaryBlue,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }

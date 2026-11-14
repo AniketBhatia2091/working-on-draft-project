@@ -33,40 +33,93 @@ For a given period budget (e.g., ₹15,000):
 - [x] **Phase 2**: Home/Personal Day View & WhatsApp Family Share Flow
 - [x] **Phase 3**: Weekly Log, Canvas Bar Chart & Home Weekly Share
 - [x] **Phase 4**: Dedicated Savings Screen, Goals & Trend Chart
-- [ ] **Phase 5**: App Lock & Biometrics for Personal Mode *(Upcoming)*
+- [x] **Phase 5**: App Lock & Biometrics for Personal Mode, Privacy Hardening & Settings Polish
 
 ---
 
-## Phase 4 Deliverables & Features
+## Phase 5 Deliverables: App Lock, Privacy Hardening & Settings Polish
 
-### 1. Dedicated Personal-Only Savings Screen
-- **Personal-Only Access**: The "Savings" tab is visible in the bottom navigation bar **only** when the app is in `PERSONAL` mode.
-- **Home Invariant & Ejection**: Default mode on every app launch is strictly `HOME`. If the user toggles back to `HOME` mode while on the Savings screen, the app immediately ejects back to the Dashboard and clears the back stack entry so Back cannot return to it.
-- **Lock Forward-Compatibility**: Annotated with `// TODO Phase 5: gate Savings behind PIN/biometric`.
+### 1. App Lock for Personal Mode
+- **PIN & Biometric Gating**: Switching from Home mode to Personal mode (from any screen's toggle or bottom navigation) requires authentication. Home mode never requires authentication.
+- **Biometric Integration**: Uses `androidx.biometric.BiometricPrompt` (fingerprint/face). Device lock screen credentials are never used as a silent bypass unless explicitly configured; the app PIN serves as the fallback.
+- **PIN Security Architecture**:
+  - Validates 4 to 6 digit numeric PINs.
+  - Generates 32-byte cryptographically secure random salts via `SecureRandom`.
+  - Hashes PIN using PBKDF2 (`PBKDF2WithHmacSHA256`) with 10,000 iterations.
+  - Constant-time verification (`MessageDigest.isEqual`) prevents timing attacks.
+  - PIN is never stored or logged in plain text.
+- **Lockout Mechanism**:
+  - After 5 consecutive failed attempts, locks out further attempts with escalating backoff:
+    - 5 failed: 30 seconds
+    - 6 failed: 60 seconds (1 minute)
+    - 7 failed: 300 seconds (5 minutes)
+    - 8+ failed: 900 seconds (15 minutes)
+  - Lockout status and remaining time are persisted across app restarts in DataStore.
 
-### 2. Comprehensive Savings Metrics
-- **Current Period Savings**: Net delta (`homeSpent - realSpent`) for the active budget period.
-- **All-Time Savings**: Cumulative savings across all logged expenses.
-- **Timeframe Breakdown**: This week's savings and this month's savings.
-- **Profitable Expense Stats**: Average savings per profitable entry (`home > real`) along with the count of saving entries.
-- **Honest Negative Savings Tracking**: Highlights when any expense had `home < real` (actual spending exceeded family report) with count and total deficit, factored honestly into net savings.
+### 2. Auto Re-Lock & Inactivity Timer
+- **Launch Invariant**: Personal mode is held strictly in memory and resets to `HOME` on every app launch.
+- **Background Auto-Lock**: Employs `ProcessLifecycleOwner` to detect `ON_STOP` and instantly resets the view mode to `HOME` when the app is backgrounded.
+- **Inactivity Timeout**: Configurable auto-relock when foregrounded without user interaction:
+  - Immediately
+  - 30 seconds *(Default)*
+  - 1 minute
+  - 5 minutes
+- Real-time window touch tracking records user interaction and resets when idle.
 
-### 3. Savings Target & Goal Tracking
-- **Settings Integration**: Configure an optional savings target (₹) and target cycle (`WEEKLY`, `MONTHLY`, or `NONE`), validated $\ge 0$ and stored in DataStore.
-- **Goal Progress Card**: Shows target amount, amount saved so far in the period, remaining deficit, percentage, and an animated progress bar.
-- **Overachievement Support**: Progress bar clamps visually to 100%, and when exceeded, celebrates with `"Goal reached! +₹X extra saved"`.
-- **Empty State**: Friendly prompt to set a goal with a direct shortcut button to Settings.
+### 3. Screen Privacy (`FLAG_SECURE`)
+- **Screenshot & Recording Protection**: Window sets `FLAG_SECURE` whenever Personal mode is active or when "Always Block Screenshots" is enabled.
+- **Recent Apps Blanking**: In recent-apps switcher, Android renders a blank window instead of exposing real spending amounts or private savings figures.
+- **Synchronous Pre-Unlock**: `FLAG_SECURE` is applied to the window *synchronously before* Personal state flows emit and before Compose renders private figures.
 
-### 4. Savings Trend Canvas Chart
-- **Pure Compose Canvas**: Built without heavy external chart libraries.
-- **Range Switcher**: Toggle between `Last 7 days`, `Last 4 weeks`, and `Last 6 months`.
-- **Zero Baseline & Negative Bar Support**: Positive savings rise upwards in green above the zero baseline; deficit/negative savings drop downwards in red below the baseline.
-- **Cumulative Savings Overlay**: Plots a continuous cumulative savings trajectory line across the periods.
+### 4. Settings Polish (Grouped Sections)
+Settings are organized into 5 clear sections:
+1. **Budget Settings**: Period budget, cut-off threshold, and period type (Weekly / Monthly).
+2. **Savings Target**: Savings goal amount (₹) and target cycle (Weekly / Monthly / None).
+3. **Family Contacts**: WhatsApp recipient management (add, edit, delete contacts with phone validation).
+4. **Privacy & Lock**:
+   - Status badge ("PIN is active" vs "No PIN set").
+   - Change PIN dialog (current PIN $\to$ new PIN $\to$ confirm).
+   - Biometric toggle (fingerprint/face recognition).
+   - Auto-lock inactivity timeout selector.
+   - "Always Block Screenshots" toggle (keeps `FLAG_SECURE` active even in Home mode).
+   - "Reset App Lock & Purge Data": Red destructive action with double confirmation warning. Resets app lock and wipes all expense records and settings to prevent unauthorized data extraction.
+5. **About DayKhata**:
+   - Application version (1.0).
+   - Neutral, family-friendly explanation of the dual-accounting concept.
 
-### 5. Architectural Privacy & Safety
-- **Zero Leaks by Type**: Structural unit tests verify that home message builders (`HomeMessageBuilder`, `HomeWeeklyMessageBuilder`) never accept `SavingsSummary` or any savings models.
-- **No Share Action**: No share actions or intents exist on the Savings screen.
-- **Zero Logcat Logging**: Real amounts, savings figures, and private labels are never logged to Logcat.
+### 5. Privacy Hardening & Audit
+- **Disabled ADB Backup**: Set `android:allowBackup="false"` in `AndroidManifest.xml` to prevent extraction of financial records via debug backups.
+- **Zero Logcat Output**: Complete code audit verifies zero occurrences of `android.util.Log` or `println` statements with sensitive data across the entire production codebase.
+- **Comprehensive Unit Testing**:
+  - `PinSecurityManagerTest`: PBKDF2 hashing, salt uniqueness, format validation, constant-time verification, and lockout backoff steps.
+  - `AutoLockManagerTest`: Inactivity tracking and timeout verification across all timeout configurations.
+  - `PrivacyAuditTest`: Verifies home builders never leak private tags or numbers, verifies zero log statements in production source, and asserts `allowBackup="false"`.
+
+---
+
+## Manual Verification Checklist
+
+1. **First-Time Personal Mode Setup**:
+   - Open app $\to$ Tap "Personal Mode" on Dashboard or Daily List.
+   - Verify PIN Setup dialog appears (4-6 digits, confirmation, optional biometric opt-in).
+   - On completion, verify Personal mode activates and "Savings" tab appears in bottom bar.
+2. **Biometric Authentication**:
+   - Return to Home mode $\to$ Tap "Personal Mode".
+   - Verify biometric prompt appears; scan fingerprint to unlock.
+3. **PIN Fallback & Lockout**:
+   - Tap "Use PIN" on biometric prompt.
+   - Enter 5 consecutive incorrect PINs.
+   - Verify lockout message: "Too many failed attempts. Try again in 30 seconds." Input is disabled.
+   - Force close and reopen app $\to$ Attempt unlock $\to$ Verify lockout timer persists.
+4. **Recent Apps Preview & Screenshot Block (`FLAG_SECURE`)**:
+   - Unlock Personal mode $\to$ Take a screenshot $\to$ Verify Android blocks screenshot ("Cannot take screenshot due to security policy").
+   - Open recent apps switcher $\to$ Verify DayKhata appears as a blank secure preview.
+5. **Background & Inactivity Auto-Lock**:
+   - In Personal mode, press Home button $\to$ Re-open app $\to$ Verify app returns to Home mode.
+   - In Personal mode, leave app idle for configured timeout $\to$ Verify app auto-locks to Home mode.
+6. **Destructive Reset App Lock**:
+   - Go to Settings $\to$ Privacy & Lock $\to$ Tap "Reset App Lock".
+   - Read warning dialog $\to$ Confirm reset $\to$ Verify all expenses, settings, and lock credentials are fully purged.
 
 ---
 
@@ -78,6 +131,8 @@ For a given period budget (e.g., ₹15,000):
 - **Target SDK**: 34
 - **Local Persistence**: Room 2.6.1 with KSP (`com.google.devtools.ksp`)
 - **Key-Value Storage**: AndroidX DataStore Preferences 1.1.1
+- **Biometrics**: AndroidX Biometric 1.1.0
+- **Process Lifecycle**: AndroidX Lifecycle Process 2.8.6
 - **Navigation**: Jetpack Navigation Compose 2.8.3
 - **Architecture**: MVVM + Clean Architecture with Coroutines & StateFlow
 

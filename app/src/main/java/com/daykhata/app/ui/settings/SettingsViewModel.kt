@@ -4,9 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.daykhata.app.data.repository.SettingsRepository
+import com.daykhata.app.domain.model.AutoLockTimeout
 import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.GoalPeriod
 import com.daykhata.app.domain.model.PeriodType
+import com.daykhata.app.domain.model.SecuritySettings
 import com.daykhata.app.domain.model.Settings
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +32,12 @@ data class SettingsUiState(
     val cutOffError: String? = null,
     val savingsGoalError: String? = null,
     val isSavedSuccess: Boolean = false,
+
+    // Security Settings
+    val securitySettings: SecuritySettings = SecuritySettings(),
+    val showPinChangeDialog: Boolean = false,
+    val showResetLockDialog: Boolean = false,
+
     // Contact dialog state
     val showContactDialog: Boolean = false,
     val contactBeingEdited: FamilyContact? = null,
@@ -41,6 +49,7 @@ data class SettingsUiState(
 
 sealed interface SettingsEvent {
     data class ShowToast(val message: String) : SettingsEvent
+    data object ResetSuccessful : SettingsEvent
 }
 
 class SettingsViewModel(
@@ -61,10 +70,11 @@ class SettingsViewModel(
         viewModelScope.launch {
             combine(
                 settingsRepository.settings,
-                settingsRepository.familyContacts
-            ) { settings, contacts ->
-                Pair(settings, contacts)
-            }.collect { (settings, contacts) ->
+                settingsRepository.familyContacts,
+                settingsRepository.securitySettings
+            ) { settings, contacts, security ->
+                Triple(settings, contacts, security)
+            }.collect { (settings, contacts, security) ->
                 _uiState.update { current ->
                     current.copy(
                         budget = settings.budget.toString(),
@@ -72,7 +82,8 @@ class SettingsViewModel(
                         periodType = settings.periodType,
                         savingsGoal = if (settings.savingsGoal > 0) settings.savingsGoal.toString() else "",
                         goalPeriod = settings.goalPeriod,
-                        familyContacts = contacts
+                        familyContacts = contacts,
+                        securitySettings = security
                     )
                 }
             }
@@ -143,6 +154,58 @@ class SettingsViewModel(
             _uiState.update { it.copy(isSavedSuccess = true) }
             _events.emit(SettingsEvent.ShowToast("Settings saved successfully"))
         }
+    }
+
+    // Security Settings actions
+    fun setBiometricEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setBiometricEnabled(enabled)
+            _events.emit(SettingsEvent.ShowToast(if (enabled) "Biometric unlock enabled" else "Biometric unlock disabled"))
+        }
+    }
+
+    fun setAutoLockTimeout(timeout: AutoLockTimeout) {
+        viewModelScope.launch {
+            settingsRepository.setAutoLockTimeout(timeout)
+            _events.emit(SettingsEvent.ShowToast("Auto-lock set to ${timeout.label}"))
+        }
+    }
+
+    fun setAlwaysBlockScreenshots(always: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setAlwaysBlockScreenshots(always)
+            _events.emit(SettingsEvent.ShowToast(if (always) "Screenshots blocked on all screens" else "Screenshots allowed in Home mode"))
+        }
+    }
+
+    fun openChangePinDialog() {
+        _uiState.update { it.copy(showPinChangeDialog = true) }
+    }
+
+    fun dismissChangePinDialog() {
+        _uiState.update { it.copy(showPinChangeDialog = false) }
+    }
+
+    fun openResetLockDialog() {
+        _uiState.update { it.copy(showResetLockDialog = true) }
+    }
+
+    fun dismissResetLockDialog() {
+        _uiState.update { it.copy(showResetLockDialog = false) }
+    }
+
+    suspend fun verifyCurrentPin(pin: String): Boolean {
+        return settingsRepository.verifyPin(pin)
+    }
+
+    suspend fun saveNewPin(pin: String) {
+        settingsRepository.setPin(pin)
+        _events.emit(SettingsEvent.ShowToast("PIN updated successfully"))
+    }
+
+    suspend fun resetAppLockAndData() {
+        settingsRepository.resetAllData()
+        _events.emit(SettingsEvent.ResetSuccessful)
     }
 
     // Family contacts management

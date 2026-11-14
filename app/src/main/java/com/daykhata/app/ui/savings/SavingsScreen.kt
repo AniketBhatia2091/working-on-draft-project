@@ -57,8 +57,6 @@ import com.daykhata.app.ui.theme.PurplePersonalLight
 import com.daykhata.app.ui.theme.RedNegative
 import com.daykhata.app.util.CurrencyUtils
 
-// TODO Phase 5: gate Savings behind PIN/biometric
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SavingsScreen(

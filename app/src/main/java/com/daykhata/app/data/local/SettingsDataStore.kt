@@ -3,14 +3,18 @@ package com.daykhata.app.data.local
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.daykhata.app.domain.model.AutoLockTimeout
 import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.PeriodType
+import com.daykhata.app.domain.model.SecuritySettings
 import com.daykhata.app.domain.model.Settings
+import com.daykhata.app.domain.security.PinSecurityManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -28,6 +32,15 @@ class SettingsDataStore(private val context: Context) {
         val KEY_FAMILY_CONTACTS = stringPreferencesKey("family_contacts_json")
         val KEY_SAVINGS_GOAL = intPreferencesKey("savings_goal")
         val KEY_GOAL_PERIOD = stringPreferencesKey("goal_period")
+
+        // Security / Phase 5 keys
+        val KEY_PIN_HASH = stringPreferencesKey("pin_hash")
+        val KEY_PIN_SALT = stringPreferencesKey("pin_salt")
+        val KEY_BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
+        val KEY_AUTO_LOCK_TIMEOUT = stringPreferencesKey("auto_lock_timeout")
+        val KEY_ALWAYS_BLOCK_SCREENSHOTS = booleanPreferencesKey("always_block_screenshots")
+        val KEY_FAILED_ATTEMPTS = intPreferencesKey("failed_attempts")
+        val KEY_LOCKOUT_UNTIL = longPreferencesKey("lockout_until_epoch")
     }
 
     val settingsFlow: Flow<Settings> = context.dataStore.data.map { preferences ->
@@ -55,6 +68,30 @@ class SettingsDataStore(private val context: Context) {
             periodStartDate = periodStartDate,
             savingsGoal = savingsGoal,
             goalPeriod = goalPeriod
+        )
+    }
+
+    val securitySettingsFlow: Flow<SecuritySettings> = context.dataStore.data.map { preferences ->
+        val pinHash = preferences[PreferencesKeys.KEY_PIN_HASH]
+        val isPinSet = !pinHash.isNullOrBlank()
+        val isBiometricEnabled = preferences[PreferencesKeys.KEY_BIOMETRIC_ENABLED] ?: false
+        val timeoutStr = preferences[PreferencesKeys.KEY_AUTO_LOCK_TIMEOUT] ?: AutoLockTimeout.SECONDS_30.name
+        val timeout = try {
+            AutoLockTimeout.valueOf(timeoutStr)
+        } catch (_: Exception) {
+            AutoLockTimeout.SECONDS_30
+        }
+        val alwaysBlockScreenshots = preferences[PreferencesKeys.KEY_ALWAYS_BLOCK_SCREENSHOTS] ?: false
+        val failedAttempts = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: 0
+        val lockoutUntil = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: 0L
+
+        SecuritySettings(
+            isPinSet = isPinSet,
+            isBiometricEnabled = isBiometricEnabled,
+            autoLockTimeout = timeout,
+            alwaysBlockScreenshots = alwaysBlockScreenshots,
+            failedAttempts = failedAttempts,
+            lockoutUntilEpoch = lockoutUntil
         )
     }
 
@@ -130,6 +167,88 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updatePeriodStartDate(startDate: Long) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.KEY_PERIOD_START_DATE] = startDate
+        }
+    }
+
+    suspend fun savePin(pin: String) {
+        val salt = PinSecurityManager.generateSalt()
+        val hash = PinSecurityManager.hashPin(pin, salt)
+        val saltHex = PinSecurityManager.toHexString(salt)
+        val hashHex = PinSecurityManager.toHexString(hash)
+
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_PIN_SALT] = saltHex
+            preferences[PreferencesKeys.KEY_PIN_HASH] = hashHex
+            preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = 0
+            preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = 0L
+        }
+    }
+
+    suspend fun verifyEnteredPin(pin: String): Boolean {
+        var isValid = false
+        context.dataStore.edit { preferences ->
+            val lockoutUntil = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: 0L
+            if (System.currentTimeMillis() < lockoutUntil) {
+                isValid = false
+                return@edit
+            }
+
+            val saltHex = preferences[PreferencesKeys.KEY_PIN_SALT] ?: ""
+            val hashHex = preferences[PreferencesKeys.KEY_PIN_HASH] ?: ""
+            if (saltHex.isBlank() || hashHex.isBlank()) {
+                isValid = false
+                return@edit
+            }
+
+            if (PinSecurityManager.verifyPin(pin, saltHex, hashHex)) {
+                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = 0
+                preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = 0L
+                isValid = true
+            } else {
+                val currentFailed = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: 0
+                val newFailed = currentFailed + 1
+                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = newFailed
+                val lockoutDuration = PinSecurityManager.getLockoutDurationSeconds(newFailed)
+                if (lockoutDuration > 0) {
+                    preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = System.currentTimeMillis() + (lockoutDuration * 1000L)
+                }
+                isValid = false
+            }
+        }
+        return isValid
+    }
+
+    suspend fun setBiometricEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_BIOMETRIC_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setAutoLockTimeout(timeout: AutoLockTimeout) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_AUTO_LOCK_TIMEOUT] = timeout.name
+        }
+    }
+
+    suspend fun setAlwaysBlockScreenshots(always: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_ALWAYS_BLOCK_SCREENSHOTS] = always
+        }
+    }
+
+    suspend fun clearSecuritySettings() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(PreferencesKeys.KEY_PIN_HASH)
+            preferences.remove(PreferencesKeys.KEY_PIN_SALT)
+            preferences.remove(PreferencesKeys.KEY_BIOMETRIC_ENABLED)
+            preferences.remove(PreferencesKeys.KEY_FAILED_ATTEMPTS)
+            preferences.remove(PreferencesKeys.KEY_LOCKOUT_UNTIL)
+        }
+    }
+
+    suspend fun clearAll() {
+        context.dataStore.edit { preferences ->
+            preferences.clear()
         }
     }
 }

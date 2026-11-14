@@ -35,7 +35,12 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val settingsRepository: SettingsRepository by lazy {
-        SettingsRepositoryImpl(settingsDataStore)
+        SettingsRepositoryImpl(
+            settingsDataStore = settingsDataStore,
+            onClearDatabase = {
+                database.expenseDao().deleteAllExpenses()
+            }
+        )
     }
 
     override val expenseCalculator: ExpenseCalculator by lazy {
