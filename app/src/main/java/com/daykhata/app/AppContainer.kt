@@ -7,12 +7,14 @@ import com.daykhata.app.data.repository.ExpenseRepository
 import com.daykhata.app.data.repository.ExpenseRepositoryImpl
 import com.daykhata.app.data.repository.SettingsRepository
 import com.daykhata.app.data.repository.SettingsRepositoryImpl
+import com.daykhata.app.domain.AppModeState
 import com.daykhata.app.domain.ExpenseCalculator
 
 interface AppContainer {
     val expenseRepository: ExpenseRepository
     val settingsRepository: SettingsRepository
     val expenseCalculator: ExpenseCalculator
+    val appModeState: AppModeState
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -34,5 +36,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val expenseCalculator: ExpenseCalculator by lazy {
         ExpenseCalculator()
+    }
+
+    override val appModeState: AppModeState by lazy {
+        AppModeState()
     }
 }

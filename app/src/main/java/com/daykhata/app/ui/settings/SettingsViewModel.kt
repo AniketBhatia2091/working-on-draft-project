@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.daykhata.app.data.repository.SettingsRepository
+import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.model.Settings
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -20,9 +22,17 @@ data class SettingsUiState(
     val budget: String = "15000",
     val cutOffLimit: String = "2000",
     val periodType: PeriodType = PeriodType.MONTHLY,
+    val familyContacts: List<FamilyContact> = emptyList(),
     val budgetError: String? = null,
     val cutOffError: String? = null,
-    val isSavedSuccess: Boolean = false
+    val isSavedSuccess: Boolean = false,
+    // Contact dialog state
+    val showContactDialog: Boolean = false,
+    val contactBeingEdited: FamilyContact? = null,
+    val contactNameInput: String = "",
+    val contactPhoneInput: String = "",
+    val contactNameError: String? = null,
+    val contactPhoneError: String? = null
 )
 
 sealed interface SettingsEvent {
@@ -40,18 +50,25 @@ class SettingsViewModel(
     val events: SharedFlow<SettingsEvent> = _events.asSharedFlow()
 
     init {
-        loadSettings()
+        loadSettingsAndContacts()
     }
 
-    private fun loadSettings() {
+    private fun loadSettingsAndContacts() {
         viewModelScope.launch {
-            val settings = settingsRepository.settings.first()
-            _uiState.update {
-                it.copy(
-                    budget = settings.budget.toString(),
-                    cutOffLimit = settings.cutOffLimit.toString(),
-                    periodType = settings.periodType
-                )
+            combine(
+                settingsRepository.settings,
+                settingsRepository.familyContacts
+            ) { settings, contacts ->
+                Pair(settings, contacts)
+            }.collect { (settings, contacts) ->
+                _uiState.update { current ->
+                    current.copy(
+                        budget = settings.budget.toString(),
+                        cutOffLimit = settings.cutOffLimit.toString(),
+                        periodType = settings.periodType,
+                        familyContacts = contacts
+                    )
+                }
             }
         }
     }
@@ -98,6 +115,84 @@ class SettingsViewModel(
             )
             _uiState.update { it.copy(isSavedSuccess = true) }
             _events.emit(SettingsEvent.ShowToast("Settings saved successfully"))
+        }
+    }
+
+    // Family contacts management
+    fun openAddContactDialog() {
+        _uiState.update {
+            it.copy(
+                showContactDialog = true,
+                contactBeingEdited = null,
+                contactNameInput = "",
+                contactPhoneInput = "",
+                contactNameError = null,
+                contactPhoneError = null
+            )
+        }
+    }
+
+    fun openEditContactDialog(contact: FamilyContact) {
+        _uiState.update {
+            it.copy(
+                showContactDialog = true,
+                contactBeingEdited = contact,
+                contactNameInput = contact.name,
+                contactPhoneInput = contact.phone,
+                contactNameError = null,
+                contactPhoneError = null
+            )
+        }
+    }
+
+    fun dismissContactDialog() {
+        _uiState.update { it.copy(showContactDialog = false) }
+    }
+
+    fun onContactNameChanged(name: String) {
+        _uiState.update { it.copy(contactNameInput = name, contactNameError = null) }
+    }
+
+    fun onContactPhoneChanged(phone: String) {
+        _uiState.update { it.copy(contactPhoneInput = phone, contactPhoneError = null) }
+    }
+
+    fun saveContact() {
+        val state = _uiState.value
+        val name = state.contactNameInput.trim()
+        if (name.isBlank()) {
+            _uiState.update { it.copy(contactNameError = "Contact name cannot be empty") }
+            return
+        }
+
+        val sanitizedPhone = FamilyContact.sanitizePhone(state.contactPhoneInput, defaultCountryCode = "91")
+        if (sanitizedPhone == null) {
+            _uiState.update { it.copy(contactPhoneError = "Enter 10 to 15 digits (default country code 91)") }
+            return
+        }
+
+        viewModelScope.launch {
+            val contactToSave = if (state.contactBeingEdited != null) {
+                state.contactBeingEdited.copy(name = name, phone = sanitizedPhone)
+            } else {
+                FamilyContact(name = name, phone = sanitizedPhone)
+            }
+
+            if (state.contactBeingEdited != null) {
+                settingsRepository.updateFamilyContact(contactToSave)
+            } else {
+                settingsRepository.addFamilyContact(contactToSave)
+            }
+
+            _uiState.update { it.copy(showContactDialog = false) }
+            _events.emit(SettingsEvent.ShowToast("Contact '${contactToSave.name}' saved"))
+        }
+    }
+
+    fun deleteContact(contact: FamilyContact) {
+        viewModelScope.launch {
+            settingsRepository.deleteFamilyContact(contact.id)
+            _events.emit(SettingsEvent.ShowToast("Contact '${contact.name}' deleted"))
         }
     }
 

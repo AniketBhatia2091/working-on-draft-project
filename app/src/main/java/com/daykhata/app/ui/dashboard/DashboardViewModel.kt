@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.daykhata.app.data.local.Expense
 import com.daykhata.app.data.repository.ExpenseRepository
 import com.daykhata.app.data.repository.SettingsRepository
+import com.daykhata.app.domain.AppModeState
 import com.daykhata.app.domain.ExpenseCalculator
 import com.daykhata.app.domain.model.ExpenseSummary
 import com.daykhata.app.domain.model.Settings
+import com.daykhata.app.domain.model.ViewMode
 import com.daykhata.app.util.DateUtils
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,16 +40,15 @@ data class DashboardUiState(
 class DashboardViewModel(
     private val expenseRepository: ExpenseRepository,
     private val settingsRepository: SettingsRepository,
-    private val calculator: ExpenseCalculator
+    private val calculator: ExpenseCalculator,
+    private val appModeState: AppModeState
 ) : ViewModel() {
-
-    private val isPersonalModeFlow = MutableStateFlow(false)
 
     val uiState: StateFlow<DashboardUiState> = combine(
         settingsRepository.settings,
-        isPersonalModeFlow
-    ) { settings, isPersonalMode ->
-        Pair(settings, isPersonalMode)
+        appModeState.mode
+    ) { settings, mode ->
+        Pair(settings, mode == ViewMode.PERSONAL)
     }.flatMapLatest { (settings, isPersonalMode) ->
         val (periodStart, periodEnd) = DateUtils.calculatePeriodRange(settings.periodType)
         val todayStart = DateUtils.getStartOfDay(System.currentTimeMillis())
@@ -83,17 +84,18 @@ class DashboardViewModel(
     )
 
     fun togglePersonalMode() {
-        isPersonalModeFlow.value = !isPersonalModeFlow.value
+        appModeState.toggleMode()
     }
 
     class Factory(
         private val expenseRepository: ExpenseRepository,
         private val settingsRepository: SettingsRepository,
-        private val calculator: ExpenseCalculator
+        private val calculator: ExpenseCalculator,
+        private val appModeState: AppModeState
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return DashboardViewModel(expenseRepository, settingsRepository, calculator) as T
+            return DashboardViewModel(expenseRepository, settingsRepository, calculator, appModeState) as T
         }
     }
 }

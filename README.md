@@ -29,40 +29,48 @@ For a given period budget (e.g., ₹15,000):
 
 ## Phase Plan
 
-- **Phase 1 (Current Phase)**: Core Foundation
-  - Project architecture, package structure (`data/`, `domain/`, `ui/`, `util/`).
-  - Room entity `Expense` + DAO (CRUD, period queries, date queries).
-  - DataStore Preferences for settings (`budget`, `cutOffLimit`, `periodType`, `periodStartDate`).
-  - Pure Kotlin `ExpenseCalculator` domain logic with comprehensive unit tests.
-  - Jetpack Compose UI:
-    - **Dashboard**: Home balance, cut-off progress bar, today's home total, cut-off warning banner, and Personal mode toggle.
-    - **Add / Edit Expense**: Input validation, optional home amount defaulting to real amount, and cut-off confirmation alert before saving.
-    - **Daily List**: Date navigation, expense list with home amounts by default, and real amounts/savings in Personal mode, with edit and delete actions.
-    - **Settings Screen**: Period budget, cut-off limit, and period type (Weekly/Monthly) configuration.
-- **Phase 2**: Weekly Charts & Analytics *(Upcoming)*
-- **Phase 3**: Savings Deep Dive & Targets *(Upcoming)*
-- **Phase 4**: Family WhatsApp Sharing (Home-facing summary generation) *(Upcoming)*
-- **Phase 5**: App Lock & Biometrics for Personal Mode *(Upcoming)*
+- [x] **Phase 1**: Core Foundation (Room, DataStore, Calculator, Dashboard, Add Expense, Cut-off Logic)
+- [x] **Phase 2**: Home/Personal Day View & WhatsApp Family Share Flow
+- [ ] **Phase 3**: Weekly Log, Charts & Analytics *(Upcoming)*
+- [ ] **Phase 4**: Savings Screen & Targets *(Upcoming)*
+- [ ] **Phase 5**: App Lock & Biometrics for Personal Mode *(Upcoming)*
 
 ---
 
-## Phase 1 Deliverables
+## Phase 2 Deliverables & Features
 
-1. **Clean MVVM & Package Layout**:
-   - `com.daykhata.app.data.local`: Room Entity `Expense`, `ExpenseDao`, `AppDatabase`, `SettingsDataStore`.
-   - `com.daykhata.app.data.repository`: `ExpenseRepository`, `SettingsRepository`.
-   - `com.daykhata.app.domain`: `ExpenseCalculator`, `Settings`, `ExpenseSummary`, `PeriodType`.
-   - `com.daykhata.app.ui`: Compose screens (`Dashboard`, `AddExpense`, `DailyList`, `Settings`), ViewModels, Navigation, Material 3 Theme.
-   - `com.daykhata.app.util`: `DateUtils` for period and date calculations.
-2. **Domain Logic & Unit Tests**:
-   - `ExpenseCalculatorTest`:
-     - Verification that blank/null home amount defaults to real amount.
-     - Verification that cut-off triggers strictly on home balance and never on real balance.
-     - Verification that savings is never affected by the budget value.
-     - Verification that today's home total reads strictly `homeAmount`.
-3. **Cut-off Protection**:
-   - Dashboard alert banner when `homeBalance <= cutOffLimit`.
-   - Modal confirmation before adding an expense when the cut-off limit has been reached.
+### 1. Home | Personal Day View
+- **Unified Segmented Mode Toggle**: Prominently displayed at the top of the Daily list view (`🏠 Home Mode` | `👤 Personal Mode`), backed by a shared `AppModeState` across ViewModels.
+- **Strict Default**: Always defaults to **HOME** mode on every fresh app launch.
+- **Home View**: Shows only `homeLabel`, `homeAmount`, day total (home), and remaining period home balance.
+- **Personal View**: Reveals `realAmount`, `personalLabel`, day total (real), and the day's savings delta (`home total - real total`).
+
+### 2. Family WhatsApp Share Flow
+- **Share Preview Bottom Sheet**: Tapping the Share icon opens a read-only bottom sheet displaying the formatted daily message.
+- **Type-Safe Domain Builder (`HomeMessageBuilder`)**:
+  - Accepts strictly `HomeExpenseItem` objects (`homeLabel`, `homeAmount`) and `homeBalance`. It is structurally impossible to leak `realAmount` or `personalLabel`.
+  - Formatted with Indian currency grouping (`₹14,770`, `₹1,05,000`).
+  - Output Example:
+    ```text
+    Daily Expenses – 14 Nov
+    Lunch – ₹150
+    Auto – ₹80
+    Total today: ₹230
+    Balance left: ₹14,770
+    ```
+  - Handles empty day gracefully: `"No expenses logged today."`
+- **Three Share Actions**:
+  1. **WhatsApp**: `ACTION_SEND` targeting `com.whatsapp`, fallback to `com.whatsapp.w4b` (WhatsApp Business), with system chooser fallback.
+  2. **Saved Person**: Direct WhatsApp link (`https://wa.me/<phone>?text=...`) targeting saved family numbers.
+  3. **Copy**: Copies the formatted text to clipboard and displays an in-app confirmation snackbar.
+
+### 3. Safety Controls
+- **Share Disabled in Personal Mode**: The share action in the top bar is completely disabled while in Personal Mode with an in-app safety banner warning.
+- **Zero Logcat Leaks**: Real amounts and personal labels are never sent to Logcat or any external intent.
+
+### 4. Family Contacts Management
+- **Settings Screen Integration**: Add, edit, and delete family contacts (`name`, `phone`).
+- **Phone Validation**: Validates 10–15 digit phone numbers and automatically prepends country code `91` for 10-digit Indian mobile numbers.
 
 ---
 

@@ -8,10 +8,13 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.model.Settings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "daykhata_settings")
 
@@ -22,6 +25,7 @@ class SettingsDataStore(private val context: Context) {
         val KEY_CUTOFF_LIMIT = intPreferencesKey("cutoff_limit")
         val KEY_PERIOD_TYPE = stringPreferencesKey("period_type")
         val KEY_PERIOD_START_DATE = longPreferencesKey("period_start_date")
+        val KEY_FAMILY_CONTACTS = stringPreferencesKey("family_contacts_json")
     }
 
     val settingsFlow: Flow<Settings> = context.dataStore.data.map { preferences ->
@@ -41,6 +45,46 @@ class SettingsDataStore(private val context: Context) {
             periodType = periodType,
             periodStartDate = periodStartDate
         )
+    }
+
+    val familyContactsFlow: Flow<List<FamilyContact>> = context.dataStore.data.map { preferences ->
+        val jsonStr = preferences[PreferencesKeys.KEY_FAMILY_CONTACTS] ?: "[]"
+        parseContactsJson(jsonStr)
+    }
+
+    suspend fun saveFamilyContacts(contacts: List<FamilyContact>) {
+        val jsonArray = JSONArray()
+        contacts.forEach { contact ->
+            val obj = JSONObject().apply {
+                put("id", contact.id)
+                put("name", contact.name)
+                put("phone", contact.phone)
+            }
+            jsonArray.put(obj)
+        }
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.KEY_FAMILY_CONTACTS] = jsonArray.toString()
+        }
+    }
+
+    private fun parseContactsJson(jsonStr: String): List<FamilyContact> {
+        return try {
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<FamilyContact>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    FamilyContact(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        name = obj.getString("name"),
+                        phone = obj.getString("phone")
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     suspend fun saveSettings(settings: Settings) {

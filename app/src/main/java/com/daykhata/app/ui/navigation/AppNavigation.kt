@@ -68,7 +68,8 @@ fun AppNavigation(container: AppContainer) {
                     factory = DashboardViewModel.Factory(
                         expenseRepository = container.expenseRepository,
                         settingsRepository = container.settingsRepository,
-                        calculator = container.expenseCalculator
+                        calculator = container.expenseCalculator,
+                        appModeState = container.appModeState
                     )
                 )
                 DashboardScreen(
@@ -87,7 +88,9 @@ fun AppNavigation(container: AppContainer) {
                 val viewModel: DailyListViewModel = viewModel(
                     factory = DailyListViewModel.Factory(
                         expenseRepository = container.expenseRepository,
-                        calculator = container.expenseCalculator
+                        settingsRepository = container.settingsRepository,
+                        calculator = container.expenseCalculator,
+                        appModeState = container.appModeState
                     )
                 )
                 DailyListScreen(
