@@ -5,6 +5,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -16,6 +17,7 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
         }
     }
     data object Weekly : Screen("weekly", "Weekly", Icons.Default.DateRange)
+    data object Savings : Screen("savings", "Savings", Icons.Default.Savings)
     data object AddExpense : Screen("add_expense?expenseId={expenseId}", "Add", Icons.Default.AddCircle) {
         fun createRoute(expenseId: Long? = null): String {
             return if (expenseId != null) "add_expense?expenseId=$expenseId" else "add_expense"
@@ -24,10 +26,23 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Settings : Screen("settings", "Settings", Icons.Default.Settings)
 }
 
-val bottomNavItems = listOf(
-    Screen.Dashboard,
-    Screen.DailyList,
-    Screen.Weekly,
-    Screen.AddExpense,
-    Screen.Settings
-)
+fun getBottomNavItems(isPersonalMode: Boolean): List<Screen> {
+    return if (isPersonalMode) {
+        listOf(
+            Screen.Dashboard,
+            Screen.DailyList,
+            Screen.Weekly,
+            Screen.Savings,
+            Screen.AddExpense,
+            Screen.Settings
+        )
+    } else {
+        listOf(
+            Screen.Dashboard,
+            Screen.DailyList,
+            Screen.Weekly,
+            Screen.AddExpense,
+            Screen.Settings
+        )
+    }
+}

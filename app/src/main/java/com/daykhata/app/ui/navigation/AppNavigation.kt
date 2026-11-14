@@ -22,11 +22,14 @@ import com.daykhata.app.ui.add_expense.AddExpenseScreen
 import com.daykhata.app.ui.add_expense.AddExpenseViewModel
 import com.daykhata.app.ui.daily_list.DailyListScreen
 import com.daykhata.app.ui.daily_list.DailyListViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.daykhata.app.domain.model.ViewMode
 import com.daykhata.app.ui.dashboard.DashboardScreen
 import com.daykhata.app.ui.dashboard.DashboardViewModel
+import com.daykhata.app.ui.savings.SavingsScreen
+import com.daykhata.app.ui.savings.SavingsViewModel
 import com.daykhata.app.ui.settings.SettingsScreen
 import com.daykhata.app.ui.settings.SettingsViewModel
-
 import com.daykhata.app.ui.weekly.WeeklyScreen
 import com.daykhata.app.ui.weekly.WeeklyViewModel
 
@@ -36,10 +39,13 @@ fun AppNavigation(container: AppContainer) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
+    val appMode by container.appModeState.mode.collectAsStateWithLifecycle()
+    val isPersonalMode = appMode == ViewMode.PERSONAL
+
     Scaffold(
         bottomBar = {
             NavigationBar {
-                bottomNavItems.forEach { screen ->
+                getBottomNavItems(isPersonalMode).forEach { screen ->
                     val isSelected = currentDestination?.route?.startsWith(screen.route.substringBefore("?")) == true
 
                     NavigationBarItem(
@@ -136,6 +142,29 @@ fun AppNavigation(container: AppContainer) {
                     viewModel = viewModel,
                     onNavigateToDailyDate = { dateMillis ->
                         navController.navigate(Screen.DailyList.createRoute(dateMillis))
+                    }
+                )
+            }
+
+            // Savings (Personal-Only)
+            composable(Screen.Savings.route) {
+                val viewModel: SavingsViewModel = viewModel(
+                    factory = SavingsViewModel.Factory(
+                        expenseRepository = container.expenseRepository,
+                        settingsRepository = container.settingsRepository,
+                        savingsCalculator = container.savingsCalculator,
+                        appModeState = container.appModeState
+                    )
+                )
+                SavingsScreen(
+                    viewModel = viewModel,
+                    onExitToDashboard = {
+                        navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Dashboard.route) { inclusive = false }
+                        }
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
                     }
                 )
             }

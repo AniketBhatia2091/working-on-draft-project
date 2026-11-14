@@ -26,6 +26,8 @@ class SettingsDataStore(private val context: Context) {
         val KEY_PERIOD_TYPE = stringPreferencesKey("period_type")
         val KEY_PERIOD_START_DATE = longPreferencesKey("period_start_date")
         val KEY_FAMILY_CONTACTS = stringPreferencesKey("family_contacts_json")
+        val KEY_SAVINGS_GOAL = intPreferencesKey("savings_goal")
+        val KEY_GOAL_PERIOD = stringPreferencesKey("goal_period")
     }
 
     val settingsFlow: Flow<Settings> = context.dataStore.data.map { preferences ->
@@ -38,12 +40,21 @@ class SettingsDataStore(private val context: Context) {
             PeriodType.MONTHLY
         }
         val periodStartDate = preferences[PreferencesKeys.KEY_PERIOD_START_DATE] ?: System.currentTimeMillis()
+        val savingsGoal = preferences[PreferencesKeys.KEY_SAVINGS_GOAL] ?: 0
+        val goalPeriodStr = preferences[PreferencesKeys.KEY_GOAL_PERIOD] ?: com.daykhata.app.domain.model.GoalPeriod.NONE.name
+        val goalPeriod = try {
+            com.daykhata.app.domain.model.GoalPeriod.valueOf(goalPeriodStr)
+        } catch (_: Exception) {
+            com.daykhata.app.domain.model.GoalPeriod.NONE
+        }
 
         Settings(
             budget = budget,
             cutOffLimit = cutOffLimit,
             periodType = periodType,
-            periodStartDate = periodStartDate
+            periodStartDate = periodStartDate,
+            savingsGoal = savingsGoal,
+            goalPeriod = goalPeriod
         )
     }
 
@@ -93,6 +104,8 @@ class SettingsDataStore(private val context: Context) {
             preferences[PreferencesKeys.KEY_CUTOFF_LIMIT] = settings.cutOffLimit
             preferences[PreferencesKeys.KEY_PERIOD_TYPE] = settings.periodType.name
             preferences[PreferencesKeys.KEY_PERIOD_START_DATE] = settings.periodStartDate
+            preferences[PreferencesKeys.KEY_SAVINGS_GOAL] = settings.savingsGoal
+            preferences[PreferencesKeys.KEY_GOAL_PERIOD] = settings.goalPeriod.name
         }
     }
 

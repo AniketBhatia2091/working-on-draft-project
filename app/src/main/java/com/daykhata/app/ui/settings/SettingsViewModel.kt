@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.daykhata.app.data.repository.SettingsRepository
 import com.daykhata.app.domain.model.FamilyContact
+import com.daykhata.app.domain.model.GoalPeriod
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.model.Settings
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,9 +23,12 @@ data class SettingsUiState(
     val budget: String = "15000",
     val cutOffLimit: String = "2000",
     val periodType: PeriodType = PeriodType.MONTHLY,
+    val savingsGoal: String = "",
+    val goalPeriod: GoalPeriod = GoalPeriod.NONE,
     val familyContacts: List<FamilyContact> = emptyList(),
     val budgetError: String? = null,
     val cutOffError: String? = null,
+    val savingsGoalError: String? = null,
     val isSavedSuccess: Boolean = false,
     // Contact dialog state
     val showContactDialog: Boolean = false,
@@ -66,6 +70,8 @@ class SettingsViewModel(
                         budget = settings.budget.toString(),
                         cutOffLimit = settings.cutOffLimit.toString(),
                         periodType = settings.periodType,
+                        savingsGoal = if (settings.savingsGoal > 0) settings.savingsGoal.toString() else "",
+                        goalPeriod = settings.goalPeriod,
                         familyContacts = contacts
                     )
                 }
@@ -83,6 +89,14 @@ class SettingsViewModel(
 
     fun onPeriodTypeChanged(newType: PeriodType) {
         _uiState.update { it.copy(periodType = newType, isSavedSuccess = false) }
+    }
+
+    fun onSavingsGoalChanged(goal: String) {
+        _uiState.update { it.copy(savingsGoal = goal, savingsGoalError = null, isSavedSuccess = false) }
+    }
+
+    fun onGoalPeriodChanged(period: GoalPeriod) {
+        _uiState.update { it.copy(goalPeriod = period, isSavedSuccess = false) }
     }
 
     fun saveSettings() {
@@ -105,12 +119,25 @@ class SettingsViewModel(
             return
         }
 
+        val goalInt = if (state.savingsGoal.trim().isNotBlank()) {
+            val parsed = state.savingsGoal.trim().toIntOrNull()
+            if (parsed == null || parsed < 0) {
+                _uiState.update { it.copy(savingsGoalError = "Savings goal must be a non-negative number") }
+                return
+            }
+            parsed
+        } else {
+            0
+        }
+
         viewModelScope.launch {
             settingsRepository.saveSettings(
                 Settings(
                     budget = budgetInt,
                     cutOffLimit = cutOffInt,
-                    periodType = state.periodType
+                    periodType = state.periodType,
+                    savingsGoal = goalInt,
+                    goalPeriod = state.goalPeriod
                 )
             )
             _uiState.update { it.copy(isSavedSuccess = true) }

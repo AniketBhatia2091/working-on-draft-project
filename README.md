@@ -32,63 +32,41 @@ For a given period budget (e.g., ₹15,000):
 - [x] **Phase 1**: Core Foundation (Room, DataStore, Calculator, Dashboard, Add Expense, Cut-off Logic)
 - [x] **Phase 2**: Home/Personal Day View & WhatsApp Family Share Flow
 - [x] **Phase 3**: Weekly Log, Canvas Bar Chart & Home Weekly Share
-- [ ] **Phase 4**: Dedicated Savings Screen & Goals *(Upcoming)*
+- [x] **Phase 4**: Dedicated Savings Screen, Goals & Trend Chart
 - [ ] **Phase 5**: App Lock & Biometrics for Personal Mode *(Upcoming)*
 
 ---
 
-## Phase 3 Deliverables & Features
+## Phase 4 Deliverables & Features
 
-### 1. Weekly Log Screen & Navigation
-- **Weekly Tab**: Added a dedicated "Weekly" destination to the bottom navigation bar.
-- **Week Selector**:
-  - Operates on a standard Monday-to-Sunday week cycle.
-  - Date range display (e.g., `10 Nov – 16 Nov`).
-  - Controls: "Previous week", "Next week" (disabled on the current week to prevent future navigation), and a quick "This week" reset button.
-- **Shared App State**: Uses the same `AppModeState` as Phase 2 for the `Home | Personal` toggle, defaulting to **HOME** on every app launch.
+### 1. Dedicated Personal-Only Savings Screen
+- **Personal-Only Access**: The "Savings" tab is visible in the bottom navigation bar **only** when the app is in `PERSONAL` mode.
+- **Home Invariant & Ejection**: Default mode on every app launch is strictly `HOME`. If the user toggles back to `HOME` mode while on the Savings screen, the app immediately ejects back to the Dashboard and clears the back stack entry so Back cannot return to it.
+- **Lock Forward-Compatibility**: Annotated with `// TODO Phase 5: gate Savings behind PIN/biometric`.
 
-### 2. Day-by-Day List
-- Seven rows covering Monday through Sunday with dates and formatted daily totals.
-- **Home Mode**: Displays day name, date, and that day's Home Total (or a dash if ₹0).
-- **Personal Mode**: Displays day name, date, Real Total, and that day's savings delta (`home - real`).
-- **Deep Linking to Daily View**: Tapping any day opens the Daily List screen pre-focused on that selected date.
+### 2. Comprehensive Savings Metrics
+- **Current Period Savings**: Net delta (`homeSpent - realSpent`) for the active budget period.
+- **All-Time Savings**: Cumulative savings across all logged expenses.
+- **Timeframe Breakdown**: This week's savings and this month's savings.
+- **Profitable Expense Stats**: Average savings per profitable entry (`home > real`) along with the count of saving entries.
+- **Honest Negative Savings Tracking**: Highlights when any expense had `home < real` (actual spending exceeded family report) with count and total deficit, factored honestly into net savings.
 
-### 3. Weekly Totals Card
-- **Home Mode**:
-  - Week Home Total
-  - Average per day (`weekHomeTotal / 7`)
-  - Highest spending day (`Mon (₹X)` or `–` on zero spend; picks earliest day on tie)
-  - Remaining home balance for current budget period
-- **Personal Mode**:
-  - Week Real Total
-  - Week Savings (`weekHomeTotal - weekRealTotal`)
-  - Average per day (real)
-  - Highest spending day (real)
+### 3. Savings Target & Goal Tracking
+- **Settings Integration**: Configure an optional savings target (₹) and target cycle (`WEEKLY`, `MONTHLY`, or `NONE`), validated $\ge 0$ and stored in DataStore.
+- **Goal Progress Card**: Shows target amount, amount saved so far in the period, remaining deficit, percentage, and an animated progress bar.
+- **Overachievement Support**: Progress bar clamps visually to 100%, and when exceeded, celebrates with `"Goal reached! +₹X extra saved"`.
+- **Empty State**: Friendly prompt to set a goal with a direct shortcut button to Settings.
 
-### 4. Custom Compose Canvas Bar Chart
-- **Lightweight Canvas**: Implemented using pure Jetpack Compose Canvas without external dependencies.
-- **Type-Safe Data Isolation**:
-  - `HomeWeekChartData`: Strictly carries only `homeAmount` totals. Real numbers cannot enter the chart in Home mode by type.
-  - `PersonalWeekChartData`: Carries real and home series side-by-side, visually illustrating the private savings gap.
-- Includes day-of-week axis labels (`Mon`..`Sun`), value labels, sensible dynamic scaling, and an empty state banner (`"No expenses this week"`).
+### 4. Savings Trend Canvas Chart
+- **Pure Compose Canvas**: Built without heavy external chart libraries.
+- **Range Switcher**: Toggle between `Last 7 days`, `Last 4 weeks`, and `Last 6 months`.
+- **Zero Baseline & Negative Bar Support**: Positive savings rise upwards in green above the zero baseline; deficit/negative savings drop downwards in red below the baseline.
+- **Cumulative Savings Overlay**: Plots a continuous cumulative savings trajectory line across the periods.
 
-### 5. Domain Calculator & Home Weekly Share
-- **`WeeklySummaryCalculator`**:
-  - Aggregates expenses by Monday–Sunday calendar slots.
-  - Handles weeks crossing month boundaries, empty weeks, and single-day activity.
-  - Tie-breaking: picks the earliest day in the week when amounts are equal.
-- **`HomeWeeklyMessageBuilder`**:
-  - Formats family-safe weekly text summary using Indian currency notation (`₹14,770`, `₹1,05,000`):
-    ```text
-    Weekly Expenses – 10 Nov to 16 Nov
-    Mon – ₹230
-    Tue – ₹180
-    ...
-    Week total: ₹1,450
-    Balance left: ₹13,550
-    ```
-  - Reuses the Phase 2 Share Preview Bottom Sheet (WhatsApp, Saved Person, Copy).
-  - **Safety**: Sharing is disabled while in Personal Mode with an explanatory warning banner.
+### 5. Architectural Privacy & Safety
+- **Zero Leaks by Type**: Structural unit tests verify that home message builders (`HomeMessageBuilder`, `HomeWeeklyMessageBuilder`) never accept `SavingsSummary` or any savings models.
+- **No Share Action**: No share actions or intents exist on the Savings screen.
+- **Zero Logcat Logging**: Real amounts, savings figures, and private labels are never logged to Logcat.
 
 ---
 

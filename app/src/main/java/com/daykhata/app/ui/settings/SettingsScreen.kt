@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
@@ -60,6 +61,7 @@ import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.ui.theme.GreenPositive
 import com.daykhata.app.ui.theme.PrimaryBlue
+import com.daykhata.app.ui.theme.PurplePersonal
 import com.daykhata.app.ui.theme.RedNegative
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -270,6 +272,88 @@ fun SettingsScreen(
                                 text = when (type) {
                                     PeriodType.MONTHLY -> "Monthly (Calendar Month)"
                                     PeriodType.WEEKLY -> "Weekly (Monday to Sunday)"
+                                },
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Savings Target (Personal)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Flag,
+                            contentDescription = null,
+                            tint = PurplePersonal,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Savings Target (Personal)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 15.sp,
+                            color = PurplePersonal
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = uiState.savingsGoal,
+                        onValueChange = { viewModel.onSavingsGoalChanged(it) },
+                        label = { Text("Savings Target (₹) (Optional)") },
+                        placeholder = { Text("e.g. 5000") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        isError = uiState.savingsGoalError != null,
+                        supportingText = {
+                            uiState.savingsGoalError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                ?: Text("Target savings amount (private)")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Target Period",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    com.daykhata.app.domain.model.GoalPeriod.entries.forEach { period ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = (uiState.goalPeriod == period),
+                                    onClick = { viewModel.onGoalPeriodChanged(period) },
+                                    role = Role.RadioButton
+                                )
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = (uiState.goalPeriod == period),
+                                onClick = null
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = when (period) {
+                                    com.daykhata.app.domain.model.GoalPeriod.MONTHLY -> "Monthly Target"
+                                    com.daykhata.app.domain.model.GoalPeriod.WEEKLY -> "Weekly Target"
+                                    com.daykhata.app.domain.model.GoalPeriod.NONE -> "No Target (Disabled)"
                                 },
                                 fontSize = 14.sp
                             )
