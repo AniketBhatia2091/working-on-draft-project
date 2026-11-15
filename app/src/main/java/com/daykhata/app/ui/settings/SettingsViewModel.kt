@@ -4,12 +4,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.daykhata.app.data.repository.SettingsRepository
+import com.daykhata.app.domain.AppModeState
+import com.daykhata.app.domain.backup.BackupManager
+import com.daykhata.app.domain.backup.RestoreMode
+import com.daykhata.app.domain.backup.RestoreResult
 import com.daykhata.app.domain.model.AutoLockTimeout
 import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.GoalPeriod
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.model.SecuritySettings
 import com.daykhata.app.domain.model.Settings
+import com.daykhata.app.domain.model.ViewMode
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -17,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -35,8 +39,15 @@ data class SettingsUiState(
 
     // Security Settings
     val securitySettings: SecuritySettings = SecuritySettings(),
+    val isPersonalMode: Boolean = false,
     val showPinChangeDialog: Boolean = false,
     val showResetLockDialog: Boolean = false,
+
+    // Backup & Restore state
+    val showExportDialog: Boolean = false,
+    val showRestoreDialog: Boolean = false,
+    val pendingRestoreFileName: String = "",
+    val isBackingUpOrRestoring: Boolean = false,
 
     // Contact dialog state
     val showContactDialog: Boolean = false,
@@ -53,7 +64,9 @@ sealed interface SettingsEvent {
 }
 
 class SettingsViewModel(
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val backupManager: BackupManager,
+    private val appModeState: AppModeState
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -71,10 +84,9 @@ class SettingsViewModel(
             combine(
                 settingsRepository.settings,
                 settingsRepository.familyContacts,
-                settingsRepository.securitySettings
-            ) { settings, contacts, security ->
-                Triple(settings, contacts, security)
-            }.collect { (settings, contacts, security) ->
+                settingsRepository.securitySettings,
+                appModeState.mode
+            ) { settings, contacts, security, mode ->
                 _uiState.update { current ->
                     current.copy(
                         budget = settings.budget.toString(),
@@ -83,11 +95,16 @@ class SettingsViewModel(
                         savingsGoal = if (settings.savingsGoal > 0) settings.savingsGoal.toString() else "",
                         goalPeriod = settings.goalPeriod,
                         familyContacts = contacts,
-                        securitySettings = security
+                        securitySettings = security,
+                        isPersonalMode = mode == ViewMode.PERSONAL
                     )
                 }
-            }
+            }.collect {}
         }
+    }
+
+    fun requestUnlockPersonal() {
+        appModeState.requestPersonalMode()
     }
 
     fun onBudgetChanged(newBudget: String) {
@@ -208,6 +225,49 @@ class SettingsViewModel(
         _events.emit(SettingsEvent.ResetSuccessful)
     }
 
+    // Backup & Restore
+    fun openExportDialog() {
+        _uiState.update { it.copy(showExportDialog = true) }
+    }
+
+    fun dismissExportDialog() {
+        _uiState.update { it.copy(showExportDialog = false) }
+    }
+
+    fun openRestoreDialog(fileName: String) {
+        _uiState.update { it.copy(showRestoreDialog = true, pendingRestoreFileName = fileName) }
+    }
+
+    fun dismissRestoreDialog() {
+        _uiState.update { it.copy(showRestoreDialog = false, pendingRestoreFileName = "") }
+    }
+
+    suspend fun generateEncryptedBackup(passphrase: CharArray): ByteArray? {
+        return try {
+            backupManager.exportEncryptedBackup(passphrase)
+        } catch (e: Exception) {
+            _events.emit(SettingsEvent.ShowToast("Export failed: ${e.message}"))
+            null
+        }
+    }
+
+    fun restoreBackup(encryptedBytes: ByteArray, passphrase: CharArray, mode: RestoreMode) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBackingUpOrRestoring = true) }
+            val result = backupManager.restoreEncryptedBackup(encryptedBytes, passphrase, mode)
+            _uiState.update { it.copy(isBackingUpOrRestoring = false, showRestoreDialog = false) }
+            when (result) {
+                is RestoreResult.Success -> {
+                    val modeLabel = if (result.mode == RestoreMode.MERGE) "Merged" else "Restored (Replaced)"
+                    _events.emit(SettingsEvent.ShowToast("$modeLabel ${result.expensesRestored} expenses, ${result.contactsRestored} contacts."))
+                }
+                is RestoreResult.Error -> {
+                    _events.emit(SettingsEvent.ShowToast(result.message))
+                }
+            }
+        }
+    }
+
     // Family contacts management
     fun openAddContactDialog() {
         _uiState.update {
@@ -287,11 +347,13 @@ class SettingsViewModel(
     }
 
     class Factory(
-        private val settingsRepository: SettingsRepository
+        private val settingsRepository: SettingsRepository,
+        private val backupManager: BackupManager,
+        private val appModeState: AppModeState
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(settingsRepository) as T
+            return SettingsViewModel(settingsRepository, backupManager, appModeState) as T
         }
     }
 }

@@ -1,9 +1,15 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+val appVersionCode = 1
+val appVersionName = "1.0.0"
 
 android {
     namespace = "com.daykhata.app"
@@ -13,15 +19,38 @@ android {
         applicationId = "com.daykhata.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        val keystorePropsFile = rootProject.file("keystore.properties")
+        if (keystorePropsFile.exists()) {
+            val properties = Properties()
+            properties.load(FileInputStream(keystorePropsFile))
+            create("release") {
+                val storePath = properties.getProperty("storeFile")
+                storeFile = rootProject.file(storePath)
+                storePassword = properties.getProperty("storePassword")
+                keyAlias = properties.getProperty("keyAlias")
+                keyPassword = properties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            val releaseSigning = signingConfigs.findByName("release")
+            signingConfig = if (releaseSigning != null && releaseSigning.storeFile?.exists() == true) {
+                releaseSigning
+            } else {
+                println("Note: keystore.properties not found or keystore file missing; falling back to debug signing for release build.")
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -45,6 +74,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.activity:activity-compose:1.9.3")
 
+    // Biometric & Process Lifecycle
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.6")
+
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.ui:ui")
@@ -52,10 +85,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-
-    // Biometric & Process Lifecycle
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.8.6")
 
     // Navigation & ViewModel
     implementation("androidx.navigation:navigation-compose:2.8.3")
@@ -77,6 +106,7 @@ dependencies {
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("org.json:json:20240303")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

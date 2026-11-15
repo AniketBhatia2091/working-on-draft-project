@@ -1,6 +1,8 @@
 package com.daykhata.app.ui.settings
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,9 +23,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
@@ -74,13 +78,19 @@ import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.GoalPeriod
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.security.BiometricHelper
+import com.daykhata.app.ui.security.BackupExportDialog
+import com.daykhata.app.ui.security.BackupRestoreDialog
 import com.daykhata.app.ui.security.PinChangeDialog
 import com.daykhata.app.ui.security.ResetAppLockDialog
 import com.daykhata.app.ui.theme.GreenPositive
 import com.daykhata.app.ui.theme.PrimaryBlue
 import com.daykhata.app.ui.theme.PurplePersonal
+import com.daykhata.app.ui.theme.PurplePersonalLight
 import com.daykhata.app.ui.theme.RedNegative
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,6 +105,46 @@ fun SettingsScreen(
 
     val isBiometricAvailable = remember(context) {
         BiometricHelper.isBiometricAvailable(context)
+    }
+
+    // Storage Access Framework Launchers
+    var pendingExportBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        uri?.let {
+            pendingExportBytes?.let { data ->
+                try {
+                    context.contentResolver.openOutputStream(it)?.use { stream ->
+                        stream.write(data)
+                    }
+                    Toast.makeText(context, "Encrypted backup saved successfully.", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to write backup: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+                pendingExportBytes = null
+            }
+        }
+    }
+
+    var pendingRestoreBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            try {
+                val bytes = context.contentResolver.openInputStream(it)?.use { stream ->
+                    stream.readBytes()
+                }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    pendingRestoreBytes = bytes
+                    val fileName = it.lastPathSegment?.substringAfterLast('/') ?: "daykhata-backup.dkbk"
+                    viewModel.openRestoreDialog(fileName)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to read backup file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -196,6 +246,41 @@ fun SettingsScreen(
             onConfirmReset = { viewModel.resetAppLockAndData() },
             onSuccess = { viewModel.dismissResetLockDialog() },
             onDismiss = { viewModel.dismissResetLockDialog() }
+        )
+    }
+
+    // Backup Export Dialog
+    if (uiState.showExportDialog) {
+        BackupExportDialog(
+            onConfirmExport = { passphrase ->
+                coroutineScope.launch {
+                    val bytes = viewModel.generateEncryptedBackup(passphrase)
+                    viewModel.dismissExportDialog()
+                    if (bytes != null) {
+                        pendingExportBytes = bytes
+                        val formatter = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+                        val defaultName = "daykhata-backup-${formatter.format(Date())}.dkbk"
+                        createDocumentLauncher.launch(defaultName)
+                    }
+                }
+            },
+            onDismiss = { viewModel.dismissExportDialog() }
+        )
+    }
+
+    // Backup Restore Dialog
+    if (uiState.showRestoreDialog) {
+        BackupRestoreDialog(
+            fileName = uiState.pendingRestoreFileName,
+            onConfirmRestore = { passphrase, mode ->
+                pendingRestoreBytes?.let { bytes ->
+                    viewModel.restoreBackup(bytes, passphrase, mode)
+                }
+            },
+            onDismiss = {
+                viewModel.dismissRestoreDialog()
+                pendingRestoreBytes = null
+            }
         )
     }
 
@@ -472,7 +557,7 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(text = "App Lock PIN", fontWeight = FontWeight.Bold)
                             Text(
-                                text = if (uiState.securitySettings.isPinSet) "PIN is active (4-6 digits)" else "No PIN set (Setup required for Personal mode)",
+                                text = if (uiState.securitySettings.isPinSet) "PIN is active (Keystore protected, 120k iterations)" else "No PIN set (Setup required for Personal mode)",
                                 fontSize = 12.sp,
                                 color = if (uiState.securitySettings.isPinSet) GreenPositive else RedNegative
                             )
@@ -580,6 +665,77 @@ fun SettingsScreen(
 
                     HorizontalDivider()
 
+                    // Encrypted Backup & Restore Sub-Section
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Backup, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(text = "Encrypted Backup & Restore", fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            text = "Export and restore your expenses with AES-256-GCM encryption and custom passphrase. No cloud sync, strictly offline.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        if (!uiState.isPersonalMode) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = PurplePersonalLight),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Unlock Personal mode to manage backups",
+                                        fontSize = 13.sp,
+                                        color = PurplePersonal,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        onClick = { viewModel.requestUnlockPersonal() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = PurplePersonal)
+                                    ) {
+                                        Text("Unlock")
+                                    }
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.openExportDialog() },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue)
+                                ) {
+                                    Icon(Icons.Default.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Export Backup", fontSize = 13.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = { openDocumentLauncher.launch(arrayOf("*/*")) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Restore Backup", fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider()
+
                     // Reset App Lock Action
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(text = "Reset App Lock & Purge Data", fontWeight = FontWeight.Bold, color = RedNegative)
@@ -625,7 +781,7 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(text = "DayKhata", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Text(text = "Version 1.0 (Production Release)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text = "Version 1.0.0 (Release Build)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
 

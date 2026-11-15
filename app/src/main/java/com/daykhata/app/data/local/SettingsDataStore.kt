@@ -14,6 +14,8 @@ import com.daykhata.app.domain.model.FamilyContact
 import com.daykhata.app.domain.model.PeriodType
 import com.daykhata.app.domain.model.SecuritySettings
 import com.daykhata.app.domain.model.Settings
+import com.daykhata.app.domain.security.KeystoreCrypto
+import com.daykhata.app.domain.security.KeystoreCryptoManager
 import com.daykhata.app.domain.security.PinSecurityManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -22,7 +24,10 @@ import org.json.JSONObject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "daykhata_settings")
 
-class SettingsDataStore(private val context: Context) {
+class SettingsDataStore(
+    private val context: Context,
+    private val crypto: KeystoreCrypto = KeystoreCryptoManager
+) {
 
     private object PreferencesKeys {
         val KEY_BUDGET = intPreferencesKey("budget")
@@ -33,14 +38,15 @@ class SettingsDataStore(private val context: Context) {
         val KEY_SAVINGS_GOAL = intPreferencesKey("savings_goal")
         val KEY_GOAL_PERIOD = stringPreferencesKey("goal_period")
 
-        // Security / Phase 5 keys
+        // Security / Phase 5 & 6 Keystore-encrypted keys
         val KEY_PIN_HASH = stringPreferencesKey("pin_hash")
         val KEY_PIN_SALT = stringPreferencesKey("pin_salt")
+        val KEY_PIN_ITERATIONS = stringPreferencesKey("pin_iterations")
         val KEY_BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
         val KEY_AUTO_LOCK_TIMEOUT = stringPreferencesKey("auto_lock_timeout")
         val KEY_ALWAYS_BLOCK_SCREENSHOTS = booleanPreferencesKey("always_block_screenshots")
-        val KEY_FAILED_ATTEMPTS = intPreferencesKey("failed_attempts")
-        val KEY_LOCKOUT_UNTIL = longPreferencesKey("lockout_until_epoch")
+        val KEY_FAILED_ATTEMPTS = stringPreferencesKey("failed_attempts_enc")
+        val KEY_LOCKOUT_UNTIL = stringPreferencesKey("lockout_until_epoch_enc")
     }
 
     val settingsFlow: Flow<Settings> = context.dataStore.data.map { preferences ->
@@ -72,8 +78,8 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val securitySettingsFlow: Flow<SecuritySettings> = context.dataStore.data.map { preferences ->
-        val pinHash = preferences[PreferencesKeys.KEY_PIN_HASH]
-        val isPinSet = !pinHash.isNullOrBlank()
+        val encPinHash = preferences[PreferencesKeys.KEY_PIN_HASH]
+        val isPinSet = !encPinHash.isNullOrBlank()
         val isBiometricEnabled = preferences[PreferencesKeys.KEY_BIOMETRIC_ENABLED] ?: false
         val timeoutStr = preferences[PreferencesKeys.KEY_AUTO_LOCK_TIMEOUT] ?: AutoLockTimeout.SECONDS_30.name
         val timeout = try {
@@ -82,8 +88,12 @@ class SettingsDataStore(private val context: Context) {
             AutoLockTimeout.SECONDS_30
         }
         val alwaysBlockScreenshots = preferences[PreferencesKeys.KEY_ALWAYS_BLOCK_SCREENSHOTS] ?: false
-        val failedAttempts = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: 0
-        val lockoutUntil = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: 0L
+
+        val encFailed = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: ""
+        val failedAttempts = crypto.decrypt(encFailed)?.toIntOrNull() ?: 0
+
+        val encLockout = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: ""
+        val lockoutUntil = crypto.decrypt(encLockout)?.toLongOrNull() ?: 0L
 
         SecuritySettings(
             isPinSet = isPinSet,
@@ -172,45 +182,75 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun savePin(pin: String) {
         val salt = PinSecurityManager.generateSalt()
-        val hash = PinSecurityManager.hashPin(pin, salt)
+        val hash = PinSecurityManager.hashPin(pin, salt, PinSecurityManager.CURRENT_ITERATIONS)
         val saltHex = PinSecurityManager.toHexString(salt)
         val hashHex = PinSecurityManager.toHexString(hash)
 
+        // Encrypt PIN credentials and lockout state with Android Keystore key
+        val encSalt = crypto.encrypt(saltHex)
+        val encHash = crypto.encrypt(hashHex)
+        val encIterations = crypto.encrypt(PinSecurityManager.CURRENT_ITERATIONS.toString())
+        val encFailed = crypto.encrypt("0")
+        val encLockout = crypto.encrypt("0")
+
         context.dataStore.edit { preferences ->
-            preferences[PreferencesKeys.KEY_PIN_SALT] = saltHex
-            preferences[PreferencesKeys.KEY_PIN_HASH] = hashHex
-            preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = 0
-            preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = 0L
+            preferences[PreferencesKeys.KEY_PIN_SALT] = encSalt
+            preferences[PreferencesKeys.KEY_PIN_HASH] = encHash
+            preferences[PreferencesKeys.KEY_PIN_ITERATIONS] = encIterations
+            preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = encFailed
+            preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = encLockout
         }
     }
 
     suspend fun verifyEnteredPin(pin: String): Boolean {
         var isValid = false
         context.dataStore.edit { preferences ->
-            val lockoutUntil = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: 0L
+            val encLockout = preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] ?: ""
+            val lockoutUntil = crypto.decrypt(encLockout)?.toLongOrNull() ?: 0L
+
             if (System.currentTimeMillis() < lockoutUntil) {
                 isValid = false
                 return@edit
             }
 
-            val saltHex = preferences[PreferencesKeys.KEY_PIN_SALT] ?: ""
-            val hashHex = preferences[PreferencesKeys.KEY_PIN_HASH] ?: ""
+            val encSalt = preferences[PreferencesKeys.KEY_PIN_SALT] ?: ""
+            val encHash = preferences[PreferencesKeys.KEY_PIN_HASH] ?: ""
+            val encIterations = preferences[PreferencesKeys.KEY_PIN_ITERATIONS] ?: ""
+
+            val saltHex = crypto.decrypt(encSalt) ?: ""
+            val hashHex = crypto.decrypt(encHash) ?: ""
+            val iterations = crypto.decrypt(encIterations)?.toIntOrNull() ?: PinSecurityManager.LEGACY_ITERATIONS
+
             if (saltHex.isBlank() || hashHex.isBlank()) {
                 isValid = false
                 return@edit
             }
 
-            if (PinSecurityManager.verifyPin(pin, saltHex, hashHex)) {
-                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = 0
-                preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = 0L
+            val verification = PinSecurityManager.verifyPinWithIterations(pin, saltHex, hashHex, iterations)
+            if (verification.isValid) {
+                // Successful verification: reset failed attempts & lockout
+                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = crypto.encrypt("0")
+                preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = crypto.encrypt("0")
+
+                // Silent migration: If hash used older iteration count, rehash with CURRENT_ITERATIONS
+                if (verification.needsRehash) {
+                    val newSalt = PinSecurityManager.generateSalt()
+                    val newHash = PinSecurityManager.hashPin(pin, newSalt, PinSecurityManager.CURRENT_ITERATIONS)
+                    preferences[PreferencesKeys.KEY_PIN_SALT] = crypto.encrypt(PinSecurityManager.toHexString(newSalt))
+                    preferences[PreferencesKeys.KEY_PIN_HASH] = crypto.encrypt(PinSecurityManager.toHexString(newHash))
+                    preferences[PreferencesKeys.KEY_PIN_ITERATIONS] = crypto.encrypt(PinSecurityManager.CURRENT_ITERATIONS.toString())
+                }
                 isValid = true
             } else {
-                val currentFailed = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: 0
+                val encCurrentFailed = preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] ?: ""
+                val currentFailed = crypto.decrypt(encCurrentFailed)?.toIntOrNull() ?: 0
                 val newFailed = currentFailed + 1
-                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = newFailed
+                preferences[PreferencesKeys.KEY_FAILED_ATTEMPTS] = crypto.encrypt(newFailed.toString())
+
                 val lockoutDuration = PinSecurityManager.getLockoutDurationSeconds(newFailed)
                 if (lockoutDuration > 0) {
-                    preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = System.currentTimeMillis() + (lockoutDuration * 1000L)
+                    val lockoutTime = System.currentTimeMillis() + (lockoutDuration * 1000L)
+                    preferences[PreferencesKeys.KEY_LOCKOUT_UNTIL] = crypto.encrypt(lockoutTime.toString())
                 }
                 isValid = false
             }
@@ -240,6 +280,7 @@ class SettingsDataStore(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences.remove(PreferencesKeys.KEY_PIN_HASH)
             preferences.remove(PreferencesKeys.KEY_PIN_SALT)
+            preferences.remove(PreferencesKeys.KEY_PIN_ITERATIONS)
             preferences.remove(PreferencesKeys.KEY_BIOMETRIC_ENABLED)
             preferences.remove(PreferencesKeys.KEY_FAILED_ATTEMPTS)
             preferences.remove(PreferencesKeys.KEY_LOCKOUT_UNTIL)

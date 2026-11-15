@@ -19,6 +19,7 @@ interface AppContainer {
     val weeklySummaryCalculator: WeeklySummaryCalculator
     val savingsCalculator: SavingsCalculator
     val appModeState: AppModeState
+    val backupManager: com.daykhata.app.domain.backup.BackupManager
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -57,5 +58,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val appModeState: AppModeState by lazy {
         AppModeState()
+    }
+
+    override val backupManager: com.daykhata.app.domain.backup.BackupManager by lazy {
+        com.daykhata.app.domain.backup.BackupManager(database, settingsRepository)
     }
 }

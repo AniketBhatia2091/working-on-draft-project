@@ -8,7 +8,8 @@ import javax.crypto.spec.PBEKeySpec
 
 object PinSecurityManager {
 
-    private const val ITERATIONS = 10000
+    const val LEGACY_ITERATIONS = 10000
+    const val CURRENT_ITERATIONS = 120000
     private const val KEY_LENGTH = 256
     private const val SALT_BYTES = 32
 
@@ -23,8 +24,8 @@ object PinSecurityManager {
         return salt
     }
 
-    fun hashPin(pin: String, salt: ByteArray): ByteArray {
-        val spec = PBEKeySpec(pin.toCharArray(), salt, ITERATIONS, KEY_LENGTH)
+    fun hashPin(pin: String, salt: ByteArray, iterations: Int = CURRENT_ITERATIONS): ByteArray {
+        val spec = PBEKeySpec(pin.toCharArray(), salt, iterations, KEY_LENGTH)
         val factory = try {
             SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         } catch (_: NoSuchAlgorithmException) {
@@ -33,12 +34,38 @@ object PinSecurityManager {
         return factory.generateSecret(spec).encoded
     }
 
+    data class PinVerificationResult(
+        val isValid: Boolean,
+        val needsRehash: Boolean
+    )
+
+    fun verifyPinWithIterations(
+        pin: String,
+        saltHex: String,
+        expectedHashHex: String,
+        iterations: Int
+    ): PinVerificationResult {
+        if (!validatePinFormat(pin)) return PinVerificationResult(isValid = false, needsRehash = false)
+        val salt = fromHexString(saltHex) ?: return PinVerificationResult(isValid = false, needsRehash = false)
+        val expectedHash = fromHexString(expectedHashHex) ?: return PinVerificationResult(isValid = false, needsRehash = false)
+
+        val actualIterations = if (iterations <= 0) LEGACY_ITERATIONS else iterations
+        val computedHash = hashPin(pin, salt, actualIterations)
+        val matches = MessageDigest.isEqual(computedHash, expectedHash)
+
+        return if (matches) {
+            PinVerificationResult(
+                isValid = true,
+                needsRehash = (actualIterations < CURRENT_ITERATIONS)
+            )
+        } else {
+            PinVerificationResult(isValid = false, needsRehash = false)
+        }
+    }
+
     fun verifyPin(pin: String, saltHex: String, expectedHashHex: String): Boolean {
-        if (!validatePinFormat(pin)) return false
-        val salt = fromHexString(saltHex) ?: return false
-        val expectedHash = fromHexString(expectedHashHex) ?: return false
-        val computedHash = hashPin(pin, salt)
-        return MessageDigest.isEqual(computedHash, expectedHash)
+        return verifyPinWithIterations(pin, saltHex, expectedHashHex, CURRENT_ITERATIONS).isValid ||
+               verifyPinWithIterations(pin, saltHex, expectedHashHex, LEGACY_ITERATIONS).isValid
     }
 
     fun getLockoutDurationSeconds(failedAttempts: Int): Long {

@@ -10,6 +10,7 @@ interface ExpenseRepository {
     fun getAllExpenses(): Flow<List<Expense>>
     fun getExpenseById(id: Long): Flow<Expense?>
     suspend fun insertExpense(expense: Expense): Long
+    suspend fun insertAll(expenses: List<Expense>): List<Long>
     suspend fun updateExpense(expense: Expense)
     suspend fun deleteExpense(expense: Expense)
     suspend fun deleteAllExpenses()
@@ -37,6 +38,10 @@ class ExpenseRepositoryImpl(
 
     override suspend fun insertExpense(expense: Expense): Long {
         return expenseDao.insert(expense)
+    }
+
+    override suspend fun insertAll(expenses: List<Expense>): List<Long> {
+        return expenseDao.insertAll(expenses)
     }
 
     override suspend fun updateExpense(expense: Expense) {

@@ -34,92 +34,111 @@ For a given period budget (e.g., ₹15,000):
 - [x] **Phase 3**: Weekly Log, Canvas Bar Chart & Home Weekly Share
 - [x] **Phase 4**: Dedicated Savings Screen, Goals & Trend Chart
 - [x] **Phase 5**: App Lock & Biometrics for Personal Mode, Privacy Hardening & Settings Polish
+- [x] **Phase 6**: Phase 5 Cleanup, Encrypted Backup/Restore & Signed Release Build
 
 ---
 
-## Phase 5 Deliverables: App Lock, Privacy Hardening & Settings Polish
+## Phase 6 Deliverables: Hardening, Encrypted Backup/Restore & Release Build
 
-### 1. App Lock for Personal Mode
-- **PIN & Biometric Gating**: Switching from Home mode to Personal mode (from any screen's toggle or bottom navigation) requires authentication. Home mode never requires authentication.
-- **Biometric Integration**: Uses `androidx.biometric.BiometricPrompt` (fingerprint/face). Device lock screen credentials are never used as a silent bypass unless explicitly configured; the app PIN serves as the fallback.
-- **PIN Security Architecture**:
-  - Validates 4 to 6 digit numeric PINs.
-  - Generates 32-byte cryptographically secure random salts via `SecureRandom`.
-  - Hashes PIN using PBKDF2 (`PBKDF2WithHmacSHA256`) with 10,000 iterations.
-  - Constant-time verification (`MessageDigest.isEqual`) prevents timing attacks.
-  - PIN is never stored or logged in plain text.
-- **Lockout Mechanism**:
-  - After 5 consecutive failed attempts, locks out further attempts with escalating backoff:
-    - 5 failed: 30 seconds
-    - 6 failed: 60 seconds (1 minute)
-    - 7 failed: 300 seconds (5 minutes)
-    - 8+ failed: 900 seconds (15 minutes)
-  - Lockout status and remaining time are persisted across app restarts in DataStore.
-
-### 2. Auto Re-Lock & Inactivity Timer
-- **Launch Invariant**: Personal mode is held strictly in memory and resets to `HOME` on every app launch.
-- **Background Auto-Lock**: Employs `ProcessLifecycleOwner` to detect `ON_STOP` and instantly resets the view mode to `HOME` when the app is backgrounded.
-- **Inactivity Timeout**: Configurable auto-relock when foregrounded without user interaction:
-  - Immediately
-  - 30 seconds *(Default)*
-  - 1 minute
-  - 5 minutes
-- Real-time window touch tracking records user interaction and resets when idle.
-
-### 3. Screen Privacy (`FLAG_SECURE`)
-- **Screenshot & Recording Protection**: Window sets `FLAG_SECURE` whenever Personal mode is active or when "Always Block Screenshots" is enabled.
-- **Recent Apps Blanking**: In recent-apps switcher, Android renders a blank window instead of exposing real spending amounts or private savings figures.
-- **Synchronous Pre-Unlock**: `FLAG_SECURE` is applied to the window *synchronously before* Personal state flows emit and before Compose renders private figures.
-
-### 4. Settings Polish (Grouped Sections)
-Settings are organized into 5 clear sections:
-1. **Budget Settings**: Period budget, cut-off threshold, and period type (Weekly / Monthly).
-2. **Savings Target**: Savings goal amount (₹) and target cycle (Weekly / Monthly / None).
-3. **Family Contacts**: WhatsApp recipient management (add, edit, delete contacts with phone validation).
-4. **Privacy & Lock**:
-   - Status badge ("PIN is active" vs "No PIN set").
-   - Change PIN dialog (current PIN $\to$ new PIN $\to$ confirm).
-   - Biometric toggle (fingerprint/face recognition).
-   - Auto-lock inactivity timeout selector.
-   - "Always Block Screenshots" toggle (keeps `FLAG_SECURE` active even in Home mode).
-   - "Reset App Lock & Purge Data": Red destructive action with double confirmation warning. Resets app lock and wipes all expense records and settings to prevent unauthorized data extraction.
-5. **About DayKhata**:
-   - Application version (1.0).
-   - Neutral, family-friendly explanation of the dual-accounting concept.
-
-### 5. Privacy Hardening & Audit
-- **Disabled ADB Backup**: Set `android:allowBackup="false"` in `AndroidManifest.xml` to prevent extraction of financial records via debug backups.
-- **Zero Logcat Output**: Complete code audit verifies zero occurrences of `android.util.Log` or `println` statements with sensitive data across the entire production codebase.
-- **Comprehensive Unit Testing**:
-  - `PinSecurityManagerTest`: PBKDF2 hashing, salt uniqueness, format validation, constant-time verification, and lockout backoff steps.
-  - `AutoLockManagerTest`: Inactivity tracking and timeout verification across all timeout configurations.
-  - `PrivacyAuditTest`: Verifies home builders never leak private tags or numbers, verifies zero log statements in production source, and asserts `allowBackup="false"`.
+### 1. Hardening & Keystore Protection Carry-Over
+- **120,000 PBKDF2 Iterations**: Raised PIN hashing iterations from 10,000 to 120,000 using `PBKDF2WithHmacSHA256`.
+- **Iteration Storage & Silent Migration**: Stored iteration count with the hash; legacy 10,000-iteration hashes continue to verify and are silently re-hashed to 120,000 iterations upon the first successful PIN entry.
+- **Android Keystore Encryption**:
+  - *Phase 5 location*: In Phase 5, PIN salt and hash were stored in `SettingsDataStore.kt` lines 29-37 as plain hex/integer preferences in DataStore.
+  - *Phase 6 upgrade*: In Phase 6, `pin_hash`, `pin_salt`, `pin_iterations`, `failed_attempts_enc`, and `lockout_until_epoch_enc` are encrypted with hardware-backed AES-256-GCM via `KeystoreCryptoManager` before writing to DataStore.
+- **Small UI Fixes Made Across Phases 5 & 6**:
+  - Removed obsolete `TODO Phase 5` in `SavingsScreen`.
+  - Added visual Lock/Unlock badges and mode status indicators on Dashboard, Daily List, and Weekly Log.
+  - Added live countdown timer in `PinAuthDialog` during lockout delays.
+  - Added red destructive warning dialog for "Reset App Lock & Purge Data".
+  - Structured Settings into 5 categorized sections with Material 3 cards and headers.
+  - Applied `FLAG_SECURE` synchronously before Personal mode numbers render.
+  - Added neutral fallback banner in Settings when Personal mode is locked for Backup & Restore.
 
 ---
 
-## Manual Verification Checklist
+### 2. Encrypted Backup & Restore (Settings > Privacy & Lock)
+- **Security-First Architecture**:
+  - Requires Personal-mode authentication before backup or restore options become accessible.
+  - User defines a custom passphrase (minimum 8 characters, confirmed twice) with explicit recovery warning.
+  - Key derived via PBKDF2-HMAC-SHA256 (210,000 iterations, 16-byte random salt).
+  - Ciphertext encrypted using AES-256-GCM (12-byte random nonce per export, 128-bit authentication tag).
+  - Sensitive arrays (`CharArray`, `ByteArray`) zeroed out after use.
+- **Versioned Binary Format (`.dkbk`)**:
+  - Magic Header: `DKBK` (4 bytes: `0x44, 0x4B, 0x42, 0x4B`)
+  - Version: `1` (4-byte Int)
+  - KDF Iterations: `210000` (4-byte Int)
+  - Salt: 16 bytes
+  - Nonce (IV): 12 bytes
+  - Payload: Ciphertext + 16-byte GCM authentication tag
+- **Payload Schema (Plaintext JSON)**:
+  - Contains: `expenses` (date, realAmount, homeAmount, homeLabel, personalLabel), `settings` (budget, cutOffLimit, periodType, periodStartDate), `familyContacts` (name, phone), `savingsGoal` (savingsGoal, goalPeriod).
+  - **Zero Security Leaks**: Explicitly verified that PIN hash, salt, iterations, lockout state, and biometrics are never serialized.
+- **Storage Access Framework (SAF)**:
+  - Export: `ActivityResultContracts.CreateDocument` generates default filename `daykhata-backup-YYYYMMDD.dkbk`.
+  - Restore: `ActivityResultContracts.OpenDocument` imports file safely without storage permissions.
+  - **No share actions or WhatsApp paths** exist for backup files; saving and opening occurs strictly via local SAF.
+- **Atomic Restore Modes**:
+  - **Merge**: Adds non-duplicate expenses (matched by date, realAmount, homeAmount, homeLabel, personalLabel) and merges contacts; preserves current budget settings.
+  - **Replace**: Wipes current database and replaces all expenses, settings, contacts, and savings goals.
+  - Executed inside a single Room database transaction (`database.withTransaction`).
 
-1. **First-Time Personal Mode Setup**:
-   - Open app $\to$ Tap "Personal Mode" on Dashboard or Daily List.
-   - Verify PIN Setup dialog appears (4-6 digits, confirmation, optional biometric opt-in).
-   - On completion, verify Personal mode activates and "Savings" tab appears in bottom bar.
-2. **Biometric Authentication**:
-   - Return to Home mode $\to$ Tap "Personal Mode".
-   - Verify biometric prompt appears; scan fingerprint to unlock.
-3. **PIN Fallback & Lockout**:
-   - Tap "Use PIN" on biometric prompt.
-   - Enter 5 consecutive incorrect PINs.
-   - Verify lockout message: "Too many failed attempts. Try again in 30 seconds." Input is disabled.
-   - Force close and reopen app $\to$ Attempt unlock $\to$ Verify lockout timer persists.
-4. **Recent Apps Preview & Screenshot Block (`FLAG_SECURE`)**:
-   - Unlock Personal mode $\to$ Take a screenshot $\to$ Verify Android blocks screenshot ("Cannot take screenshot due to security policy").
-   - Open recent apps switcher $\to$ Verify DayKhata appears as a blank secure preview.
-5. **Background & Inactivity Auto-Lock**:
-   - In Personal mode, press Home button $\to$ Re-open app $\to$ Verify app returns to Home mode.
-   - In Personal mode, leave app idle for configured timeout $\to$ Verify app auto-locks to Home mode.
-6. **Destructive Reset App Lock**:
-   - Go to Settings $\to$ Privacy & Lock $\to$ Tap "Reset App Lock".
-   - Read warning dialog $\to$ Confirm reset $\to$ Verify all expenses, settings, and lock credentials are fully purged.
+---
+
+### 3. Release Build & Signing Configuration
+- **Signing Keystore**:
+  - Configured in `app/build.gradle.kts` to read from root `keystore.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`).
+  - Added `keystore.properties`, `*.jks`, and `*.keystore` to `.gitignore`. None are tracked in git.
+  - Provided `keystore.properties.example` with placeholder credentials.
+  - If `keystore.properties` is absent, build automatically falls back to debug signing with a console note so `./gradlew assembleRelease` and `./gradlew bundleRelease` always succeed cleanly.
+- **How to Generate Your Real Release Keystore**:
+  ```bash
+  keytool -genkey -v -keystore daykhata-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias daykhata
+  ```
+  Create `keystore.properties` at project root:
+  ```properties
+  storeFile=daykhata-release.jks
+  storePassword=your_keystore_password
+  keyAlias=daykhata
+  keyPassword=your_key_password
+  ```
+- **R8 Minification & Code Optimization**:
+  - `isMinifyEnabled = true`, `isShrinkResources = true` enabled for release.
+  - Proguard rules configured for Room, DataStore, Compose, Biometric, and DTOs.
+  - Strips all `android.util.Log` calls in release builds via `-assumenosideeffects`.
+  - Neutral adaptive launcher icon: `#1E88E5` primary blue background with clean white ledger book glyph (`@mipmap/ic_launcher`).
+- **Release Artifacts & Metrics**:
+  - Version: `versionName = "1.0.0"`, `versionCode = 1`
+  - Release APK: `app/build/outputs/apk/release/app-release.apk` (**2.2 MB**, reduced from 18 MB debug APK)
+  - Release AAB Bundle: `app/build/outputs/bundle/release/app-release.aab` (**4.5 MB**)
+
+---
+
+## Release Smoke Checklist
+
+1. **Clean Launch**:
+   - Install release APK on an Android device or emulator.
+   - Verify app launches cleanly into **Home Mode** (never into Personal Mode).
+2. **Personal Mode PIN & Biometric Setup**:
+   - Toggle to Personal Mode $\to$ Complete PIN setup (4-6 digits) $\to$ Optionally enable Biometric.
+   - Verify Personal Mode unlocks and "Savings" tab appears.
+3. **Screen Privacy & Multitasking (`FLAG_SECURE`)**:
+   - In Personal Mode, attempt screenshot $\to$ verify system blocks capture.
+   - Open recent apps switcher $\to$ verify DayKhata displays a blank/black secure thumbnail.
+4. **Auto-Relock Verification**:
+   - In Personal Mode, press Home button (background app) $\to$ reopen app $\to$ verify app returns to Home Mode.
+   - Leave app idle for configured timeout (30s) $\to$ verify app auto-relocks to Home Mode.
+5. **Family WhatsApp Share**:
+   - In Home Mode, click Share $\to$ verify message contains only homeLabel and homeAmount.
+   - Toggle to Personal Mode $\to$ verify Share button is disabled.
+6. **Encrypted Backup Round-Trip**:
+   - In Personal Mode $\to$ Settings $\to$ Privacy & Lock $\to$ Export Encrypted Backup.
+   - Enter passphrase $\to$ Save file (`daykhata-backup-YYYYMMDD.dkbk`).
+   - Add/delete an expense.
+   - Restore From Backup $\to$ Select file $\to$ Enter passphrase $\to$ Test Merge and Replace modes.
+   - Verify restored expenses and settings match perfectly.
+7. **R8 Runtime Verification**:
+   - Verify zero crashes when accessing Room, DataStore, Biometrics, and Canvas charts in the release build.
 
 ---
 
@@ -131,6 +150,7 @@ Settings are organized into 5 clear sections:
 - **Target SDK**: 34
 - **Local Persistence**: Room 2.6.1 with KSP (`com.google.devtools.ksp`)
 - **Key-Value Storage**: AndroidX DataStore Preferences 1.1.1
+- **Security & Keystore**: Android Keystore AES-256-GCM, PBKDF2 (120,000 iterations for PIN, 210,000 for Backup)
 - **Biometrics**: AndroidX Biometric 1.1.0
 - **Process Lifecycle**: AndroidX Lifecycle Process 2.8.6
 - **Navigation**: Jetpack Navigation Compose 2.8.3
@@ -140,7 +160,7 @@ Settings are organized into 5 clear sections:
 
 ## Building & Testing
 
-To run all unit tests:
+To run all 11 unit test suites:
 ```bash
 ./gradlew testDebugUnitTest
 ```
@@ -149,4 +169,16 @@ To build debug APK:
 ```bash
 ./gradlew assembleDebug
 ```
-Output APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
+Output: `app/build/outputs/apk/debug/app-debug.apk` (18 MB)
+
+To build release APK (with R8 code & resource shrinking):
+```bash
+./gradlew assembleRelease
+```
+Output: `app/build/outputs/apk/release/app-release.apk` (2.2 MB)
+
+To build release Android App Bundle (AAB):
+```bash
+./gradlew bundleRelease
+```
+Output: `app/build/outputs/bundle/release/app-release.aab` (4.5 MB)

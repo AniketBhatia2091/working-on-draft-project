@@ -286,7 +286,9 @@ fun AppNavigation(
             composable(Screen.Settings.route) {
                 val viewModel: SettingsViewModel = viewModel(
                     factory = SettingsViewModel.Factory(
-                        settingsRepository = container.settingsRepository
+                        settingsRepository = container.settingsRepository,
+                        backupManager = container.backupManager,
+                        appModeState = container.appModeState
                     )
                 )
                 SettingsScreen(

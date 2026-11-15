@@ -37,8 +37,8 @@ class PinSecurityManagerTest {
         val pin = "1234"
         val salt = PinSecurityManager.generateSalt()
 
-        val hash1 = PinSecurityManager.hashPin(pin, salt)
-        val hash2 = PinSecurityManager.hashPin(pin, salt)
+        val hash1 = PinSecurityManager.hashPin(pin, salt, PinSecurityManager.CURRENT_ITERATIONS)
+        val hash2 = PinSecurityManager.hashPin(pin, salt, PinSecurityManager.CURRENT_ITERATIONS)
 
         assertTrue(hash1.contentEquals(hash2))
         assertEquals(32, hash1.size)
@@ -77,6 +77,47 @@ class PinSecurityManagerTest {
     }
 
     @Test
+    fun `legacy 10000 iteration hash verifies successfully and signals needsRehash`() {
+        val pin = "4321"
+        val salt = PinSecurityManager.generateSalt()
+        val saltHex = PinSecurityManager.toHexString(salt)
+        // Created with legacy 10,000 iterations
+        val legacyHashHex = PinSecurityManager.toHexString(
+            PinSecurityManager.hashPin(pin, salt, PinSecurityManager.LEGACY_ITERATIONS)
+        )
+
+        val result = PinSecurityManager.verifyPinWithIterations(
+            pin = "4321",
+            saltHex = saltHex,
+            expectedHashHex = legacyHashHex,
+            iterations = PinSecurityManager.LEGACY_ITERATIONS
+        )
+
+        assertTrue("Verification should succeed for legacy hash", result.isValid)
+        assertTrue("needsRehash must be true for legacy iteration count", result.needsRehash)
+    }
+
+    @Test
+    fun `current 120000 iteration hash verifies successfully without needing rehash`() {
+        val pin = "9876"
+        val salt = PinSecurityManager.generateSalt()
+        val saltHex = PinSecurityManager.toHexString(salt)
+        val currentHashHex = PinSecurityManager.toHexString(
+            PinSecurityManager.hashPin(pin, salt, PinSecurityManager.CURRENT_ITERATIONS)
+        )
+
+        val result = PinSecurityManager.verifyPinWithIterations(
+            pin = "9876",
+            saltHex = saltHex,
+            expectedHashHex = currentHashHex,
+            iterations = PinSecurityManager.CURRENT_ITERATIONS
+        )
+
+        assertTrue("Verification should succeed for current hash", result.isValid)
+        assertFalse("needsRehash must be false for current 120,000 iteration count", result.needsRehash)
+    }
+
+    @Test
     fun `hex encoding and decoding round-trips accurately`() {
         val bytes = byteArrayOf(0x00, 0x0f, 0x10, 0x7f, (-128).toByte(), (-1).toByte())
         val hex = PinSecurityManager.toHexString(bytes)
@@ -100,5 +141,24 @@ class PinSecurityManagerTest {
         // 8+ attempts locks out for 900s (15m)
         assertEquals(900L, PinSecurityManager.getLockoutDurationSeconds(8))
         assertEquals(900L, PinSecurityManager.getLockoutDurationSeconds(15))
+    }
+
+    @Test
+    fun `KeystoreCryptoManager encrypts and decrypts accurately`() {
+        val plain = "a3f5b7c890124def"
+        val encrypted = KeystoreCryptoManager.encrypt(plain)
+
+        assertNotEquals(plain, encrypted)
+        assertTrue(encrypted.contains(":"))
+
+        val decrypted = KeystoreCryptoManager.decrypt(encrypted)
+        assertEquals(plain, decrypted)
+    }
+
+    @Test
+    fun `KeystoreCryptoManager decrypt handles unencrypted legacy string gracefully`() {
+        val legacyPlain = "unencrypted_legacy_hex_string"
+        val decrypted = KeystoreCryptoManager.decrypt(legacyPlain)
+        assertEquals(legacyPlain, decrypted)
     }
 }
